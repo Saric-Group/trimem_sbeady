@@ -1719,12 +1719,13 @@ class TriLmp():
                     pair_coeff 1 2 nonreciprocal {activity_1} {activity_2} {mobility_1} {mobility_2} {cutoff_nonrec}
                 """))
             elif self.beads.bead_interaction=='lj/cut':
+		overlay=True # MMB: LAMMPS seems to complain if this is not here
                 bead_ljd = 0.5 * (self.estore.eparams.bond_params.lc1 + np.max(self.beads.bead_sizes))
                 cutoff=4*bead_ljd
                 cmds:list[str]=[]
-                if self.beads.n_types==1:
-                    cmds.append(dedent(f"""\                    
-                        pair_coeff * * 0 0 0 0                   
+                if self.beads.n_types==1: ## MMB: removing \ from next line (program complains about it?)
+                    cmds.append(dedent(f"""                    
+                        pair_coeff * * {self.beads.bead_interaction} 0 0 0                    
                         pair_coeff 1 2 {self.beads.bead_interaction} {self.beads.bead_interaction_params[0]} {bead_ljd} {bead_ljd*self.beads.bead_interaction_params[1]}  
                         pair_coeff 2 2 {self.beads.bead_interaction} 0 0 0             
                         """))
@@ -1739,7 +1740,7 @@ class TriLmp():
                         else:
                             for j in range(i,self.beads.n_types):
                                 cmds.append(f'pair_coeff {i + 2} {j + 2}  {self.beads.bead_interaction} 0 0 0')
-                add_pair(str(self.beads.bead_interaction),float(cutoff),"",'\n'.join(cmds))
+                add_pair(str(self.beads.bead_interaction),float(cutoff),"","\n".join(cmds))
             elif self.beads.bead_interaction=='custom':
                 raise NotImplementedError()
                 # self.lmp.commands_string(self.beads.bead_interaction_params)
