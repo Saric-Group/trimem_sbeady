@@ -10,13 +10,15 @@ The command creates a sphere of radius ```r_sphere = 1``` by default. You can se
 
 ![DivisionMesh](https://github.com/Saric-Group/trimem_sbeady/assets/58335020/c1f703f4-7071-4ad4-99f1-f2dc76404661)
 
-The use of Trimesh to initialize the triangulated mesh is not compulsory. If you are not satisfied with the resolution provided because you'd like something in between the values allowed by the ```icosphere``` function, you can use the in-house code of the group to initialize your own mesh. The only thing to keep in mind is that you must give ```trilmp``` the same array format that ```icosphere``` does.
+The use of Trimesh to initialize the triangulated mesh is not compulsory. If you are not satisfied with the resolution because you want something in between the values allowed by the ```icosphere``` function, you can use the in-house code of the group to initialize your own mesh. The only thing to keep in mind is that you must give ```trilmp``` the same array format that ```icosphere``` does for the vertex coordinates and vertex faces (the triangles), that is, ```np.array([N, 3])```.
+
+You can find C codes that format the 'icos' files of the the in-house meshing program in the ```triangulatedmesh_ccode``` directory in this repository. To compile, simply type ```gcc -o EXENAME *.c``` in your terminal.
 
 ***
 
 **2. Rescaling the edge lengths and lengthscale definition [Before initializing trilmp object]** 
 
-When you initially create your mesh, there will be an average edge length that depends both on ```r``` and ```r_sphere``` (see above). You can define the desired lengthscale of your system by rescaling the edge length. In the code below, we set the average edge length of the system to the position of the minimum in a Lennard-Jones potential (i.e., $r_{\min} = 2^{1/6}\sigma$).
+When you initially create your mesh with Trimesh, there will be an average edge length that depends both on ```r``` and ```r_sphere``` (see above). You can define the desired lengthscale of your system by rescaling the edge length. In the code below, we set the average edge length of the system to the position of the minimum in a Lennard-Jones potential (i.e., $r_{\min} = 2^{1/6}\sigma$).
 
 ```
 sigma = 1
@@ -27,6 +29,8 @@ mesh.vertices *= scaling
 ```
 
 When perfoming this type of scaling keep in mind that different ```r``` values will give you spheres with different radii: the larger ```r```, the larger the radius of the sphere for the same average edge length.
+
+This scaling is NOT necessary when you use the meshes produced by the in-house code.
 
 ***
 
@@ -98,6 +102,15 @@ The figure below shows the average time it takes to perform one simulation step 
 
 **3. A comment on numerical stability and what parameters to use**
 
-Simulations for membranes (with membrane parameters ```k_v = k_a = 1e6```, ```k_c =0```, ```k_t =1e5```, ```k_r=1e3```) tend to explode when the step size is ```step_size = 0.01, 0.001```, while ```step_size = 5e-4``` seems stable. Different membrane parameters may admit larger step sizes for the MD stage of the program.
+Simulations for membranes (with membrane parameters ```k_v = k_a = 1e6```, ```k_c =0```, ```k_t =1e5```, ```k_r=1e3```) tend to explode when the step size is ```step_size = 0.01, 0.001```, while ```step_size = 5e-4``` seems stable. Different membrane parameters may admit larger step sizes for the MD stage of the program. For example, relaxing the membrane constraints to ```k_v = k_a = 5e5```, ```k_c =0```, ```k_t =1e4```, ```k_r=1e3``` admits ```step_size = 1e-3```.
 
+***
+
+# A few rules of thumb
+
+If you don't know what parameters to try at first, start with:
+
+- ```step_size=1e-3``` (large enough for efficient sampling, but small enough to prevent explotions)
+- ```traj_steps>=50``` (to avoid problems with temperature of the membrane)
+- ```flip_ratio=0.1``` (large enough to ensure fluidity, but small enough to have efficient simulations)
 
