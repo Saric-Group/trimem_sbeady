@@ -32,7 +32,7 @@ When perfoming this type of scaling keep in mind that different ```r``` values w
 
 **IMPORTANT**
 
-The way you initialize the mesh/membrane for your simulations is VERY important, since Trimem will use the initial configuration as the reference to impose the volume, area and curvature constraints by default. This means that a membrane initialized with Trimesh, and a membrane initialized with the in-house code, with the same number of vertices may lead to different diffusion coefficients if the initial average bond length is not the same.
+The way you initialize the mesh/membrane for your simulations is VERY important, since Trimem will use the initial configuration as the reference to impose the volume, area and curvature constraints by default. This means that a membrane initialized with Trimesh, and a membrane initialized with the in-house code, with the same number of vertices may lead to different diffusion coefficients if the initial average bond length is not the same. To ensure membrane fluidity, please make sure that your initial bond distribution is skewed towards $r_{\min} = 2^{1/6}$.
 
 ***
 
@@ -115,4 +115,6 @@ If you don't know what parameters to try at first, start with:
 - ```step_size=1e-3``` (large enough for efficient sampling, but small enough to prevent explotions)
 - ```traj_steps>=50``` (to avoid problems with temperature of the membrane)
 - ```flip_ratio=0.1``` (large enough to ensure fluidity, but small enough to have efficient simulations)
+
+With these parameters and a trimesh initialization, you should see a diffusion coefficient $D\sim 0.02 ~\sigma^2/\tau$ for the beads/vertices of the membrane.
 
