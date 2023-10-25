@@ -30,7 +30,9 @@ mesh.vertices *= scaling
 
 When perfoming this type of scaling keep in mind that different ```r``` values will give you spheres with different radii: the larger ```r```, the larger the radius of the sphere for the same average edge length.
 
-This scaling is NOT necessary when you use the meshes produced by the in-house code.
+**IMPORTANT**
+
+The way you initialize the mesh/membrane for your simulations is VERY important, since Trimem will use the initial configuration as the reference to impose the volume, area and curvature constraints by default. This means that a membrane initialized with Trimesh, and a membrane initialized with the in-house code, with the same number of vertices may lead to different diffusion coefficients if the initial average bond length is not the same.
 
 ***
 
