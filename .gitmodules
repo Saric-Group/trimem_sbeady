@@ -3,4 +3,4 @@
 	url = https://gitlab.vci.rwth-aachen.de:9000/OpenMesh/OpenMesh.git
 [submodule "lammps"]
 	path = lammps
-	url = git@github.com:lammps/lammps.git
+	url = https://github.com/lammps/lammps.git
