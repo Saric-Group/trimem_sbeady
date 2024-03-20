@@ -20,6 +20,7 @@
    - Whether neighbor lists are correct or not has been checked by implementing
    a LJ potential, and seing whether the trajectories are equal (see _SanityChecks folder)
 
+  - Update: implement the force as a velocity
 ------------------------------------------------------------------------- */
 
 #include <math.h>
@@ -70,6 +71,8 @@ PairNonReciprocal::~PairNonReciprocal()
     memory->destroy(cut);
     memory->destroy(activity);
     memory->destroy(mobility);
+    memory->destroy(masscoll);
+    memory->destroy(dampingcoll);
   }
 }
 
@@ -184,60 +187,17 @@ void PairNonReciprocal::compute(int eflag, int vflag)
         fyj = - catcoll_coeff_i * rexpinv * unitvec_y;
         fzj = - catcoll_coeff_i * rexpinv * unitvec_z;
 
-        // update forces on i
-        f[i][0] += fxi;
-        f[i][1] += fyi;
-        f[i][2] += fzi;
+        // update forces on i (new on 5/12/2023) -- multiplying by this factor makes them forces
+        f[i][0] += fxi*(masscoll[itype][jtype]/dampingcoll[itype][jtype]);
+        f[i][1] += fyi*(masscoll[itype][jtype]/dampingcoll[itype][jtype]);
+        f[i][2] += fzi*(masscoll[itype][jtype]/dampingcoll[itype][jtype]);
 
         if (newton_pair || j < nlocal) {
-          // update forces on j
-          f[j][0] += fxj;
-          f[j][1] += fyj;
-          f[j][2] += fzj;
+          // update forces on j (new on 5/12/2023) -- multiplying by this factor makes them forces
+          f[j][0] += fxj*(masscoll[jtype][itype]/dampingcoll[jtype][itype]);
+          f[j][1] += fyj*(masscoll[jtype][itype]/dampingcoll[jtype][itype]);
+          f[j][2] += fzj*(masscoll[jtype][itype]/dampingcoll[jtype][itype]);
         }
-
-
-        // -------------------------------------------------
-        //  MODIFYING PARTICLE VELOCITIES INSTEAD OF FORCES
-        //  please note that the sign change is due to using a single vector
-        //  to define the direction of motion. Signs agree with Golestanian paper.
-        //  Problematic for keeping the temperature of the system?
-        //  Or is it just that the temperature of the system is measured from the velocity
-        //  in which case it is just fucked up because we are injecting energy here?
-        // -------------------------------------------------
-        /*
-        r = sqrt(rsq);
-        rinv  = 1.0/r;
-        rexpinv = pow(rinv, 2);
-
-        unitvec_x = delx * rinv;
-        unitvec_y = dely * rinv;
-        unitvec_z = delz * rinv;
-
-        // the interaction scale = velocity scale, contains diffusivities of chemicals
-        catcoll_coeff_i = activity[itype][jtype] * mobility[jtype][itype] * int_scale;
-        catcoll_coeff_j = activity[jtype][itype] * mobility[itype][jtype] * int_scale;
-
-        // velocity drift on i due to field created by j (J ON I)
-        vxi = catcoll_coeff_j * rexpinv * unitvec_x;
-        vyi = catcoll_coeff_j * rexpinv * unitvec_y;
-        vzi = catcoll_coeff_j * rexpinv * unitvec_z;
-
-        // forces acting on j are due to field created by i (I ON J)
-        vxj = - catcoll_coeff_i * rexpinv * unitvec_x;
-        vyj = - catcoll_coeff_i * rexpinv * unitvec_y;
-        vzj = - catcoll_coeff_i * rexpinv * unitvec_z;
-
-        // update velocity on i
-        v[i][0] += vxi;
-        v[i][1] += vyi;
-        v[i][2] += vzi;
-
-        // update velocity on j
-        v[j][0] += vxj;
-        v[j][1] += vyj;
-        v[j][2] += vzj;
-        */
       }
     }
   }
@@ -273,6 +233,8 @@ void PairNonReciprocal::allocate()
   memory->create(cut,      n, n, "pair:cut");
   memory->create(activity, n, n, "pair:activity");
   memory->create(mobility, n, n, "pair:mobility");
+  memory->create(masscoll, n, n, "pair:masscoll");
+  memory->create(dampingcoll, n, n, "pair:dampingcoll");
 }
 
 /* ----------------------------------------------------------------------
@@ -324,7 +286,7 @@ void PairNonReciprocal::coeff(int narg, char **arg)
   (5) cutoff (6) diffusivity
   */
 
-  if (narg < 6 || narg > 8)
+  if (narg < 9 || narg > 11)
     error->all(FLERR,"Incorrect args for pair_style catcolloid coefficients");
   if (!allocated) allocate();
 
@@ -336,23 +298,31 @@ void PairNonReciprocal::coeff(int narg, char **arg)
   double activity_j      = utils::numeric(FLERR,arg[3],true,lmp);
   double mobility_i      = utils::numeric(FLERR,arg[4],true,lmp);
   double mobility_j      = utils::numeric(FLERR,arg[5],true,lmp);
+  double masscoll_i      = utils::numeric(FLERR,arg[6],true,lmp);
+  double masscoll_j      = utils::numeric(FLERR,arg[7],true,lmp);
+  double dampingcoll_i   = utils::numeric(FLERR,arg[8],true,lmp);
+  double dampingcoll_j   = utils::numeric(FLERR,arg[9],true,lmp);
 
   // optional (one can specify a cutoff here)
   double cut_one        = cut_global;
-  if(narg == 7) cut_one = utils::numeric(FLERR, arg[6], true, lmp);
+  if(narg == 11) cut_one = utils::numeric(FLERR, arg[10], true, lmp);
 
   // filling-in particle properties
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
     for (int j = MAX(jlo,i); j <= jhi; j++) {
-      activity[i][j] = activity_i;
-      activity[j][i] = activity_j;
-      mobility[i][j] = mobility_i;
-      mobility[j][i] = mobility_j;
-      cut[i][j]      = cut_one;
-      cut[j][i]      = cut_one;
-      setflag[i][j]  = 1;
-      setflag[j][i]  = 1;
+      activity[i][j]    = activity_i;
+      activity[j][i]    = activity_j;
+      mobility[i][j]    = mobility_i;
+      mobility[j][i]    = mobility_j;
+      masscoll[i][j]    = masscoll_i;
+      masscoll[j][i]    = masscoll_j;
+      dampingcoll[i][j] = dampingcoll_i;
+      dampingcoll[j][i] = dampingcoll_j;
+      cut[i][j]         = cut_one;
+      cut[j][i]         = cut_one;
+      setflag[i][j]     = 1;
+      setflag[j][i]     = 1;
       count++;
     }
   }

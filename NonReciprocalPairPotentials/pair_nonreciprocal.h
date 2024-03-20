@@ -57,7 +57,8 @@
         double int_scale;      // scale for the interaction
         double **activity;     // activity of the catalytic colloid
         double **mobility;     // mobility of the catalytic colloid
-        double *cut_respa;
+        double **masscoll;     // mass of the colloids - NECESSARY TO IMPLEMENT AS A VELOCITY
+        double **dampingcoll;  // damping of the colloids - NECESSARY TO IMPLEMENT AS A VELOCITY
       };
     }
   #endif
