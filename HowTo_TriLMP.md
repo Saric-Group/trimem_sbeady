@@ -118,3 +118,5 @@ If you don't know what parameters to try at first, start with:
 
 With these parameters and a trimesh initialization, you should see a diffusion coefficient $D\sim 0.02 ~\sigma^2/\tau$ for the beads/vertices of the membrane.
 
+# On triLMP 2.0
+Cleaned-up version of TriLMP, where TriLMP object has minimal functionalities hard-coded (only those needed to initialize the class). This allows us to add in an organized manner functionalities that come from LAMMPS externally in the Python run file.
