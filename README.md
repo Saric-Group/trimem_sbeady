@@ -94,13 +94,22 @@ which should print something like
 ```
 and will be referred to as "python_path" in the next bash command. Not that this enables PyLammps this specific conda environment only! 
 
-Now we can set up the makefiles and build LAMMPS w
-REMARK: -D PKG_ASPHERE=yes is not stricly necessary in what comes next, but instead you can add whatever package you have in mind for your simulations.
+Now we can set up the makefiles and build LAMMPS. The command line you see below is a suggestion for the LAMMPS packages you may want to compile for tests (these are suggested here because they have proved useful in the past in the development of works involving TriLMP).
 
-```bash
-cmake -D BUILD_OMP=yes -D BUILD_SHARED_LIBS=yes -D PYTHON_EXECUTABLE="python_path" -D PKG_MOLECULE=yes -D PKG_PYTHON=yes -D PKG_OPENMP=yes -D PKG_EXTRA-PAIR=yes -D PKG_ASPHERE=yes ../cmake
+```
+cmake -D BUILD_OMP=yes -D BUILD_SHARED_LIBS=yes -D PYTHON_EXECUTABLE="your_python_path" -D PKG_PYTHON=yes -D PKG_OPENMP=yes -D PKG_MOLECULE=yes  -D PKG_EXTRA-PAIR=yes -D PKG_EXTRA-FIX=yes -D PKG_EXTRA-COMPUTE=yes -D PKG_RIGID=yes -D PKG_ASPHERE=yes -D PKG_BROWNIAN=yes -D PKG_MC=yes -D PKG_REACTION=yes ../cmake 
 cmake --build .
 ```
+
+Roughly, this is what some of these packages can be useful for:
+- ```EXTRA-PAIR``` $\rightarrow$ ```pair_style harmonic/cut```, ```pair_style cosine/squared```
+- ```EXTRA-COMPUTE``` $\rightarrow$ ```compute gyration/shape```
+- ```RIGID``` $\rightarrow$ ```fix rigid```
+- ```ASPHERE``` $\rightarrow$ ```atom_style ellipsoid```
+- ```MC``` $\rightarrow$ ```fix gcmc```, ```fix bond/create```
+- ```REACTION``` $\rightarrow$ ```fix bond/react```
+
+Please feel free to add or delete as many LAMMPS packages as you want. You can always come back and recompile LAMMPS with additional packages in the future if you need it.
 
 Finally to make LAMMPS accessible for python, i.e. making and copying the shared libaries.
 
