@@ -1,10 +1,95 @@
+################################################################################
+# TriLmp: TRIMEM (Siggel et. al, 2023) + LAMMPS                                #
+# Enabling versatile MD simulations w/dynamically triangulated membranes       #
+#                                                                              #
+# This program was originally created during the summer of 2023                #
+# by Michael Wassermair during an internship in the Saric Group (ISTA).        #
+# It is based on TRIMEM (Siggel et al.), which was originally intended         #
+# to perform Hybrid Monte Carlo (HMC) energy minimization of the Helfrich      #
+# Hamiltonian using a vertex-averaged triangulated mesh discretisation.        #
+# By connecting the latter with LAMMPS, we expose the mesh vertices            #
+# (pseudo-particles). This allows us to perform simulations of a               #
+# triangulated membrane under different scenarios, detailed below.             #                                                
+#                                                                              #
+# The program depends on a modified version of trimem and LAMMPS that uses     #
+# specific packages and the additional pair_styles nonreciprocal               #
+# and nonreciprocal/omp (see SETUP_GUIDE.txt and HowTo_TriLMP.md for details)  #
+#                                                                              #
+# ORIGINAL PROGRAM STRUCTURE                                                   #
+# - Internal classes used by TriLmp                                            #
+# - TriLmp Object                                                              #
+#                                                                              #
+# --- Default Parameters -> description of all parameters                      #
+# --- Initialization of Internal classes using parameters                      #
+# --- Init. of TRIMEM EnergyManager used for gradient/energy                   #
+#     of helfrich hamiltonian                                                  #
+#                                                                              #
+# --- LAMMPS initialisation                                                    #
+# ---+++ Creating instances of lmp                                             #
+# ---+++ Setting up Basic system                                               #
+# ---+++ Calling Lammps functions to set thermostat and interactions           #
+#                                                                              #
+# --- FLIPPING Functions                                                       #
+# --- HMC/MD Functions + Wrapper Functions used on TRIMEM side                 #
+# --- RUN Functions -> simulation utility to be used in script                 #
+# --- CALLBACK and OUTPUT                                                      #
+# --- Some Utility Functions                                                   #
+# --- Minimize Function -> GD for preconditionining states for HMC             #
+# --- Pickle + Checkpoint Utility                                              #
+# --- LAMMPS scrips used for setup                                             #
+#                                                                              #
+#                                                                              #
+# TRILM FUNCTIONALITIES                                                        #
+# 1. Triangulated vesicle in solution                                          #
+#   1.1. Tube pulling experiment                                               #
+# 2. Triangulated vesicle in the presence of                                   #
+#   2.1. Nanoparticles/symbionts                                               #
+#   2.2. Elastic membrane (S-layer)                                            #
+#   2.3. Rigid bodies/symbionts                                                #
+# 3. Extended simulation functionalities                                       #
+#   3.1. GCMC Simulations                                                      #
+#   3.2. Chemical reactions                                                    #
+# The code is updated by the following members of the Saric group              #
+# - Maitane Munoz Basagoiti (MMB) - maitane.munoz-basagoiti@ista.ac.at         #
+# - Miguel Amaral (MA) - miguel.amaral@ista.ac.at                              #
+# Implementation codes of chemical reactions without topology information:     #
+# - Felix Wodaczek (FW) - felix.wodaczek@ista.ac.at                            #                                     #
+#                                                                              #
+# ADDITIONAL NOTES                                                             #
+# To perform HMC simulation that accepts all configurations:                   #
+#   - thermal_velocities=False, pure_MD=True                                   #
+# To perform HMC simulation as in Trimem:                                      #
+#   - thermal_velocities=True, pure_MD=False)                                  #
+################################################################################
 
-import re,textwrap
-from typing import Sequence
+################################################################################
+#                             IMPORTS                                          #
+################################################################################
+
+import re,textwrap, warnings, psutil, os, sys, time, pickle, pathlib
+from typing import Union as pyUnion # to avoid confusion with ctypes.Union
+from datetime import datetime, timedelta
+from copy import copy
+
+from collections import Counter
+import numpy as np
+from scipy.optimize import minimize
+import trimem.mc.trilmp_h5
+from ctypes import *
+from lammps import lammps, PyLammps, LAMMPS_INT, LMP_STYLE_GLOBAL, LMP_VAR_EQUAL, LMP_VAR_ATOM, LMP_TYPE_SCALAR, LMP_TYPE_VECTOR, LMP_TYPE_ARRAY, LMP_SIZE_VECTOR, LMP_SIZE_ROWS, LMP_SIZE_COLS
+
+import trimesh
+from .. import core as m
+from trimem.core import TriMesh
+from trimem.mc.mesh import Mesh
+from trimem.mc.output import make_output
+
 _sp = u'\U0001f604'
 _nl = '\n'+_sp
+
 def block(s):
-	return _nl.join(s.split('\n'))
+    return _nl.join(s.split('\n'))
+
 def dedent(s):
     ls = s.split('\n')
     if ls[-1]=='':
@@ -22,83 +107,9 @@ def dedent(s):
             c=None
     return textwrap.dedent('\n'.join(ls))
 
-
-
-import warnings
-from datetime import datetime, timedelta
-import psutil
-import os
-
-from copy import copy
-
-import trimesh
-from .. import core as m
-from trimem.core import TriMesh
-from trimem.mc.mesh import Mesh
-
-from trimem.mc.output import make_output
-from collections import Counter
-
-import pickle
-import pathlib
-
-import numpy as np
-import time
-from scipy.optimize import minimize
-
-import trimem.mc.trilmp_h5
-
-
-
-
-
-
-from ctypes import *
-from lammps import lammps, PyLammps, LAMMPS_INT, LMP_STYLE_GLOBAL, LMP_VAR_EQUAL, LMP_VAR_ATOM, LMP_TYPE_SCALAR, LMP_TYPE_VECTOR, LMP_TYPE_ARRAY, LMP_SIZE_VECTOR, LMP_SIZE_ROWS, LMP_SIZE_COLS
-
-
-###############################################################################################
-"""
-TriLmp - Combinig TRIMEM and LAMMPS to enable versatile MD simulations using triangulated mesh membranes
-
-This program was created in 2023 by Michael Wassermair in the course of an internship in the Saric Group (ISTA).
-It is based on the software TRIMEM, which was originally intended to perform
-HMC energy minimization of the Helfrich Hamiltonian using a vertex-averaged triangulared mesh discretisation.
-By connecting the latter with LAMMPS we expose the mesh vertices defining the membrane to interactions with external
-particles using LAMMPS pair_ or bond_styles.
-
-It is dependent on a modified version of trimem and LAMMPS using specific packages 
-and the additional pair_styles nonreciprocal and nonreciprocal/omp 
-See SETUP_GUIDE.txt for details.
-
-The overall structure of the programm is 
-
--Internal classes used by TriLmp
--TriLmp Object
-
--- Default Parameters -> description of all parameters
--- Initialization of Internal classes using parameters
--- Init. of TRIMEM EnergyManager used for gradient/energy of helfrich hamiltonian
-
--- LAMMPS initialisation
---- Creating instances of lmp
---- Setting up Basic system
---- calling Lammps functions to set thermostat and interactions
-
--- FLIPPING Functions  
--- HMC/MD Functions + Wrapper Functions used on TRIMEM side
--- RUN Functions -> simulation utility to be used in script
--- CALLBACK and OUTPUT 
--- Some Utility Functions
--- Minimize Function -> GD for preconditionining states for HMC
--- Pickle + Checkpoint Utility
--- LAMMPS scrips used for setup
-
-
-"""
-########################################################################
-#                   INTERNAL CLASSES TO BE USED BY TriLmP              #
-########################################################################
+################################################################################
+#                   INTERNAL CLASSES TO BE USED BY TriLmP                      #
+################################################################################
 
 class Timer():
     "Storage for timer state to reinitialize PerformanceEnergyEvaluator after Reset"
@@ -110,7 +121,6 @@ class Timer():
         self.timestamps=ts_default
         self.start=stime
 
-
 class InitialState():
     def __init__(self,area,volume,curvature,bending,tethering):
         """Storage for reference properties to reinitialize Estore after Reset. In case of reinstating Surface
@@ -120,7 +130,7 @@ class InitialState():
         self.curvature=curvature
         self.bending=bending
         self.tethering=tethering
-        
+
 class Beads():
     def __init__(self,n_types,bead_int,bead_int_params,bead_pos,bead_vel,bead_sizes,bead_masses,bead_types,self_interaction,self_interaction_params):
         """Storage for Bead parameters.
@@ -160,7 +170,6 @@ class Beads():
         self.bead_sizes=bead_sizes                      ## diameter
         self.self_interaction=self_interaction
         self.self_interaction_params=self_interaction_params
-
 
 class OutputParams():
     """Containter for parameters related to the output option """
@@ -208,13 +217,9 @@ class AlgoParams():
                  maxiter,
                  refresh,
                  thermal_velocities,
-                 langevin_thermostat,
-                 langevin_damp,
-                 langevin_seed,
                  pure_MD,
                  switch_mode,
-                 box,
-                 additional_command
+                 box
                  ):
 
         self.num_steps=num_steps
@@ -231,192 +236,201 @@ class AlgoParams():
         self.maxiter=maxiter
         self.refresh=refresh
         self.thermal_velocities=thermal_velocities
-        self.langevin_thermostat=langevin_thermostat
-        self.langevin_damp=langevin_damp
-        self.langevin_seed=langevin_seed
         self.pure_MD=pure_MD
         self.switch_mode=switch_mode
         self.box=box
-        self.additional_command=additional_command
 
-
-
-###############################################################
-#                  MAIN TRILMP CLASS OBJECT                   #
-###############################################################
+################################################################################
+#                  MAIN TRILMP CLASS OBJECT                                    #
+################################################################################
 
 class TriLmp():
 
     def __init__(self,
-                 ##############################################
-                 #             DEFAULT PARAMETERS             #
-                 ##############################################
-                 #Initialization
-                 initialize=True,     # Determines if mesh is used as new reference in estore
-                 #MESH
+
+                 # INITIALIZATION
+                 initialize=True,                  # determines if mesh is used as new reference in estore
+                 num_particle_types=1,             # how many particle types will there be in the system
+                 mass_particle_type=[1],           # the mass of the particle per type
+                 group_particle_type=['vertices'], # insert the name of each group
+
+                 # TRIANGULATED MEMBRANE MESH
                  mesh_points=None,    # positions of membrane vertices
                  mesh_faces=None,     # faces defining mesh
                  mesh_velocity=None,  # initial velocities
-                 #BOND
+
+                 # TRIANGULATED MEMBRANE BONDS
                  bond_type='Edge',      # 'Edge' or 'Area
-                 bond_r=2,              # steepness of potential walls
+                 bond_r=2,              # steepness of potential walls (from Trimem)
                  lc0=None,              # upper onset ('Edge') default will be set below
                  lc1=None,              # lower onset ('Edge')
                  a0=None,               # reference face area ('Area')
-                 #SURFACEREPULSION
-                 n_search="cell-list",  # neighbour list types ('cell and verlet') -> NOT USED TODO
-                 rlist=0.1,             # neighbour list cutoff -> NOT USED TODO
-                 exclusion_level=2,     # neighbourhood exclusion setting -> NOT IMPLEMENTED TODO
-                 rep_lc1=None,           # lower onset for surface repusion (default set below)
-                 rep_r= 2,              # steepness for repulsion potential
-                 delta= 0.0,            # "timestep" parameter continuation for hamiltonian
-                 lam= 1.0,              # cross-over parameter continuation for hamiltonian (see trimem -> NOT FULLY FUNCTIONAL YET)
-                 kappa_b = 30.0,        # bending
-                 kappa_a = 1.0e6,       # area penalty
-                 kappa_v = 1.0e6,       # volume penalty
-                 kappa_c = 1.0e6,       # curvature (area-difference) penalty
-                 kappa_t = 1.0e5,       # tethering
-                 kappa_r = 1.0e3,       # surface repulsion
-                 area_frac = 1.0,       # target area (fraction of referrence)
-                 volume_frac = 1.0,     # target volume
-                 curvature_frac = 1.0,  # target curvature
 
-                 #ALGORITHM
+                 # TRIANGULATED MEMBRANE MECHANICAL PROPERTIES
+                 n_search="cell-list",       # neighbour list types ('cell and verlet') -> NOT USED
+                 rlist=0.1,                  # neighbour list cutoff -> NOT USED
+                 exclusion_level=2,          # neighbourhood exclusion setting -> NOT IMPLEMENTED
+                 rep_lc1=None,               # lower onset for surface repusion (default set below)
+                 rep_r= 2,                   # steepness for repulsion potential
+                 delta= 0.0,                 # "timestep" parameter continuation for hamiltonian
+                 lam= 1.0,                   # cross-over parameter continuation for hamiltonian (see trimem -> NOT FUNCTIONAL)
+                 kappa_b = 20.0,             # bending modulus
+                 kappa_a = 1.0e6,            # area penalty
+                 kappa_v = 1.0e6,            # volume penalty
+                 kappa_c = 1.0e6,            # curvature (area-difference) penalty
+                 kappa_t = 1.0e5,            # tethering
+                 kappa_r = 1.0e3,            # surface repulsion
+                 area_frac = 1.0,            # target area
+                 volume_frac = 1.0,          # target volume
+                 curvature_frac = 1.0,       # target curvature
+                 print_bending_energy=False, # might increase simulation run
+
+                 # REFERENCE STATE DATA placeholders to be filled by reference state parameters (used to reinitialize estore)
+                 area=1.0,          # reference area
+                 volume=1.0,        # reference volume
+                 curvature=1.0,     # reference curvature
+                 bending=1.0,       # reference bending
+                 tethering=1.0,     # reference tethering
+                 #repulsion=1.0,    # would be used if surface repulsion was handeld by TRIMEM
+
+                 # PROGRAM PARAMETERS
                  num_steps=10,                  # number of overall simulation steps (for trilmp.run() but overitten by trilmp.run(N))
-                 reinitialize_every=10000,      # NOT USED TODO
-                 init_step='{}',                # NOT USED TODO
-                 step_size=7e-5,                # Trajectory length for each MD step
-                 traj_steps=100,                # timestep for MD (fix nve)
+                 reinitialize_every=10000,      # NOT USED - TODO
+                 init_step='{}',                # NOT USED - TODO
+                 step_size=7e-5,                # MD time step
+                 traj_steps=100,                # MD trajectory length
                  momentum_variance=1.0,         # mass of membrane vertices
                  flip_ratio=0.1,                # fraction of flips intended to flip
                  flip_type='parallel',          # 'serial' or 'parallel'
                  initial_temperature=1.0,       # temperature of system
-                 cooling_factor=1.0e-4,         # cooling factor for simulated anneadling -> NOT IMPLEMENTED TODO
-                 start_cooling=0,               # sim step at which cooling starts -> NOT IMPLEMENTED TODO
-                 maxiter=10,                    # parameter used for minimize function (maximum gradient steps
+                 cooling_factor=1.0e-4,         # cooling factor for simulated anneadling -> NOT IMPLEMENTED
+                 start_cooling=0,               # sim step at which cooling starts -> NOT IMPLEMENTED
+                 maxiter=10,                    # parameter used for minimize function (maximum gradient steps)
                  refresh=1,                     # refresh rate of neighbour list -> NOT USED TODO
 
-                 #  !!!!!!!!!!!!!!!!!!!!!!!!!!!
-                 ##############################
-                 #  SIMULATION STYLE          #
-                 ##############################
-                 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!
-                 #################################################################################################
-                 # to perform BD simulation (thermal_velocities=False, langevin_thermostat=True, pure_MD=True)   #
-                 # to perform HMC simulation (thermal_velocities=True, langevin_thermostat=False, pure_MD=False) #
-                 #################################################################################################
-                 thermal_velocities=False,      # thermal reset of velocities at the begin of each MD step
-                 langevin_thermostat=True,      # uses langevin thermostat to
-                 langevin_damp=0.03,            # damping time for thermostat
-                 langevin_seed=1,               # seed for thermostat noise
-                 pure_MD=True,                  # accept every MD trajectory
-                 switch_mode='random',          # 'random' or 'alernating' -> either random choice of flip-or-move
-                 box=(-10,10,-10,10,-10,10),    # Simulation BOX (periodic)
-                 additional_command=None,        # add a LAMMPS command """ COMMAND 1
-                                                #                          COMMAND 2  ...    """ at the end of LAMMPS initialisation
+                 # MD SIMULATION PARAMETERS
+                 box=(-100,100,-100,100,-100,100),    # simulation box
+                 periodic=False,                      # periodic boundary conditions
+                 thermal_velocities=False,            # thermal reset of velocities at the begin of each MD step
+                 pure_MD=True,                        # if true, accept every MD trajectory
+                 switch_mode='random',                # 'random' or 'alternating': sequence of MD, MC stages
+                 equilibrated=False,                  # equilibration state of membrane
+                 equilibration_rounds=-1,             # number of equilibration rounds
+                 # check_neigh_every=1,                 # neighbour list checking (when applicable - not for gcmc)
 
-
-
-                 #OUTPUT
-                 info=10,              # output hmc and flip info to shell every nth step
-                 thin=10,              # output trajectory every nth step
-                 out_every= 0,         # output minimize state every nth step (only for gradient minimization)
-
-                 input_set='inp.stl',  # hast to be stl file or if True uses mesh -> NOT USED TODO
-                 output_prefix='inp',  # name of simulation files
-                 restart_prefix='inp', # name for checkpoint files
-                 checkpoint_every= 1,  # checkpoint every nth step
-                 output_format='xyz',  # output format for trajectory -> NOT YET (STATISFYINGLY) IMPLEMENTED TODO
-
-                 output_flag='A',      # initial flag for output (alternating A/B)
-                 output_counter=0,     # used to initialize (outputted) trajectory number in writer classes
+                 # OUTPUT FILE PARAMETERS
+                 info=10,                     # output hmc and flip info to shell every nth step
+                 thin=10,                     # output trajectory every nth program (MD + HC) step
+                 out_every= 0,                # output minimize state every nth step (only for gradient minimization)
+                 input_set='inp.stl',         # hast to be stl file or if True uses mesh -> NOT USED
+                 output_prefix='inp',         # name of simulation files
+                 restart_prefix='inp',        # name for checkpoint files
+                 checkpoint_every= 1,         # checkpoint every nth step
+                 output_format='xyz',         # output format for trajectory -> NOT YET (STATISFYINGLY) IMPLEMENTED
+                 output_flag='A',             # initial flag for output (alternating A/B)
+                 output_counter=0,            # used to initialize (outputted) trajectory number in writer classes
                  performance_increment=1000,  # print performance stats every nth step to output_prefix_performance.dat
                  energy_increment=250,        # print total energy to energy.dat
 
-                # REFERENCE STATE DATA
-                 area=1.0,                    # placeholders to be filled by reference state parameters (used to reinitialize estore)
-                 volume=1.0,
-                 curvature=1.0,
-                 bending=1.0,
-                 tethering=1.0,
-                 #repulsion=1.0,             # would be used if surface repulsion was handeld by TRIMEM
-                # TIMING UTILITY
-                 ptime=time.time(),  #
-                 ptimestamp=[],      # used to time performence stats
+                 # TIMING UTILITY (used to time performance stats)
+                 ptime=time.time(),
+                 ptimestamp=[],
                  dtimestamp=[],
                  timearray=np.zeros(2),
                  timearray_new=np.zeros(2),
                  stime=datetime.now(),
-                # COUNTERS
-                 move_count=0,   #move counts (to initialize with)
-                 flip_count=0,   #flip counts (to initialize with) -> use this setting to set a start step (move+flip)
 
+                 # COUNTERS
+                 move_count=0,   # move counts (to initialize with)
+                 flip_count=0,   # flip counts (to initialize with) -> use this setting to set a start step (move+flip)
 
-                 # BEADS (see Bead class for details)
-                 n_types=0,
-                 bead_int='lj/cut',
-                 bead_int_params=(0,0),
-                 bead_pos=np.zeros((0,0)),
-                 bead_vel=None,
-                 bead_sizes=0.0,
-                 bead_masses=1.0,
-                 bead_types=[],
-                 self_interaction=False,
-                 self_interaction_params=(0,0)
+                 # BEADS/NANOPARTICLES
+                 # (must be initialized in init because affects input file)
+                 n_types=0,                     # number of nanoparticle types
+                 bead_int='lj/cut',             # interaction between membrane and nanoparticles
+                 bead_int_params=(0,0),         # interaction parameters (depends on pair style)
+                 bead_pos=np.zeros((0,0)),      # positioning of the beads
+                 bead_vel=None,                 # initial bead velocity
+                 bead_sizes=0.0,                # bead sizes
+                 bead_masses=1.0,               # bead masses
+                 bead_types=[],                 # bead types
+                 self_interaction=False,        # interaction between nanoparticles
+                 self_interaction_params=(0,0),  # nanoparticle interaction parameters
+                 n_bond_types = 1,
+
+                 # EXTENSIONS MMB: ELASTIC MEMBRANE/S-LAYER
+                 # (must be initialized in init because affects input file)
+                 slayer = False,             # set true if simulation also contains elastic membrane
+                 slayer_points=[],           # positions elastic membrane/S-layer vertices
+                 slayer_bonds = [],          # bonds in elastic membrane/S-layer
+                 slayer_dihedrals = [],      # dihedrals in elastic membrane/S-layer
+                 slayer_kbond=1,             # bond harmonic stiffness
+                 slayer_kdihedral=1,         # dihedral harmonic stiffness
+                 slayer_rlbond=2**(1.0/6.0), # rest length of the bonds
+
+                 # EXTENSIONS MMB: RIGID SYMBIONT
+                 # (must be initialized in init because affects input file)
+                 fix_rigid_symbiont=False,              # whether or not there will be a rigid symbiont
+                 fix_rigid_symbiont_coordinates=None,   # coordinates that define the rigid symbiont
+                 fix_rigid_symbiont_interaction=None,   # interactions of the rigid symbiont
+                 fix_rigid_symbiont_params=None,        # parameters for the membrane-rigid symbiont interaction
+
+                 # MAKE TIME-DEPENDENT INTERACTION TOREMOVE?
+                 fix_time_dependent_interaction=False,
+
                  ):
 
-        
-       ##################################
-       #    SOME MINOR PREREQUESITES    #
-       ##################################
 
-        # initialize using mesh arguments?
-        self.initialize = initialize
-        self.acceptance_rate = 0.0
-        # used for minim
+        ########################################################################
+        #                            SOME MINOR PREREQUESITES                  #
+        ########################################################################
+
+        # initialization of (some) object attributes
+        self.initialize           = initialize
+        self.equilibrated         = equilibrated
+        self.equilibration_rounds = equilibration_rounds
+        self.acceptance_rate      = 0.0
+        self.print_bending_energy = print_bending_energy
+        # self.check_neigh_every    = check_neigh_every
+        self.num_particle_types   = num_particle_types
+        self.MDsteps              = 0.0
+
+        # used for (TRIMEM) minimization
         self.flatten = True
         if self.flatten:
             self._ravel = lambda x: np.ravel(x)
         else:
             self._ravel = lambda x: x
 
-        # different bond types  (used for tether potential in TRIMEM)
+        # different bond types used for tether potential in TRIMEM
         self._bond_enums = {
             "Edge": m.BondType.Edge,
             "Area": m.BondType.Area
         }
 
+        # used in interaction function
+        self.fix_time_dependent_interaction = fix_time_dependent_interaction
 
-        #########################
-        #         MESH          #
-        #########################
-        # Argument: mesh should be Mesh object gets converted to Mesh.trimesh (TriMesh) internally
+        ########################################################################
+        #                         MESH INITIALIZATION                          #
+        ########################################################################
+
+        # mesh must be 'Mesh object'
+        # gets converted to Mesh.trimesh (TriMesh) internally
         self.mesh = Mesh(points=mesh_points, cells=mesh_faces)
+
         if pure_MD:
             self.mesh_temp=0
         else:
             self.mesh_temp = Mesh(points=mesh_points, cells=mesh_faces)
+
         self.mesh_velocity=mesh_velocity
         self.n_vertices=self.mesh.x.shape[0]
 
-        #######################
-        #        BEADS        #
-        #######################
-        self.beads=Beads(n_types,
-                         bead_int,
-                         bead_int_params,
-                         bead_pos,
-                         bead_vel,
-                         bead_sizes,
-                         bead_masses,
-                         bead_types,
-                         self_interaction,
-                         self_interaction_params)
+        ########################################################################
+        #                       MESH BONDS/TETHERS                             #
+        ########################################################################
 
-
-        #######################
-        #   BONDS/TETHERS     #
-        #######################
         self.bparams = m.BondParams()
         if issubclass(type(bond_type), str):
             self.bparams.type = self._bond_enums[bond_type]
@@ -424,67 +438,56 @@ class TriLmp():
             self.bparams.type=bond_type
         self.bparams.r = bond_r
 
-        # default setting for bonds related to average distance of initial mesh
-        ###############################################
-        # !! MEMBRANE LENGTHSCALES ARE SET HERE  !!   #
-       ################################################
         if (lc1 is None) and (lc0 is None) and self.initialize:
             a, l = m.avg_tri_props(self.mesh.trimesh)
-            self.bparams.lc0 = 1.25 * l
-            self.bparams.lc1 = 0.75 * l
+            self.bparams.lc0 = np.sqrt(3) # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
+            self.bparams.lc1 = 1.0        # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
             self.bparams.a0 = a
         else:
+            a, l = m.avg_tri_props(self.mesh.trimesh)
             self.bparams.lc0 = lc0
             self.bparams.lc1 = lc1
-            self.bparams.a0  = a0
+            self.bparams.a0  = a
 
-
-        print(f'l0={self.bparams.lc0/1.25}\nlc1={self.bparams.lc1}\nlc0={self.bparams.lc0}\n')
-
-
-        #################################
-        #      SURFACE REPULSION        #
-        #################################
-        #      handeled by LAMMPS       #
-        #################################
+        ########################################################################
+        #               SUPERFACE REPULSION (dealt by LAMMPS)                  #
+        ########################################################################
 
         self.rparams = m.SurfaceRepulsionParams()
+
         # neighbour lists of TRIMEM are not used but kept here in case needed
         self.rparams.n_search = n_search
         self.rparams.rlist = rlist
-        #
 
         #currently default 2 is fixed, not yet implemented to change TODO
         self.rparams.exclusion_level = exclusion_level
 
         if rep_lc1==None:
             #by default set to average distance used for scaling tether potential
-            self.rparams.lc1 = self.bparams.lc1/0.75 #rep_lc1
+            self.rparams.lc1 = 1.0 # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
         else:
-            self.rparams.lc1=rep_lc1
-        #self.rparams.lc1 = l*0.001
+            self.rparams.lc1 = rep_lc1
+
+        # surface repulsion steepness
         self.rparams.r = rep_r
 
-        print(f'l0={self.bparams.lc0 / 1.25}\nlc1={self.bparams.lc1}\nlc0={self.bparams.lc0}\nr_lc0={self.rparams.lc1}\n')
-        ###############################
-        #  PARAMETER CONTINUATION     #
-        ###############################
-        # translate energy params
-        # see trimem doc for details
-        ###############################
+        ########################################################################
+        #   PARAMETER CONTINUATION: translate energy params (see TRIMEM        #
+        ########################################################################
+
         self.cp = m.ContinuationParams()
         self.cp.delta = delta
         self.cp.lam = lam
 
-        ###############################
-        #     ENERGY PARAMETERS       #
-        ##################################################################
-        # CAVEAT!! If one wants to change parameters between             #
-        # two trilmp.run() commands in a simulation script               #
-        # one has to alter trilmp.estore.eparams.(PARAMETER OF CHOICE).  #
-        # These parameters will also be used to reinitialize LAMMPS, i.e #
-        # in pickling for the checkpoints                                #
-        ##################################################################
+        ########################################################################
+        #                           ENERGY PARAMETERS                          #
+        # CAVEAT!! If one wants to change parameters between                   #
+        # two trilmp.run() commands in a simulation script                     #
+        # one has to alter trilmp.estore.eparams.(PARAMETER OF CHOICE).        #
+        # These parameters will also be used to reinitialize LAMMPS, i.e       #
+        # in pickling for the checkpoints                                      #
+        ########################################################################
+
         self.eparams = m.EnergyParams()
         self.eparams.kappa_b = kappa_b
         self.eparams.kappa_a = kappa_a
@@ -499,22 +502,18 @@ class TriLmp():
         self.eparams.repulse_params = self.rparams
         self.eparams.continuation_params = self.cp
 
-       ###############################
-       #   ALGORITHMIC PARAMETERS    #
-       ###############################
+        ########################################################################
+        #                        ALGORITHMIC PARAMETERS                        #
+        ########################################################################
+
         self.algo_params=AlgoParams(num_steps,reinitialize_every,init_step,step_size,traj_steps,
                  momentum_variance,flip_ratio,flip_type,initial_temperature,
-                 cooling_factor,start_cooling,maxiter,refresh,thermal_velocities,
-                langevin_thermostat,
-                langevin_damp,
-                langevin_seed,
-                pure_MD,
-                switch_mode,
-                box,additional_command)
+                 cooling_factor,start_cooling,maxiter,refresh,thermal_velocities,pure_MD,switch_mode,box)
 
-       ###############################
-       #     OUTPUT PARAMETERS       #
-       ###############################
+        ########################################################################
+        #                      OUTPUT PARAMETERS                               #
+        ########################################################################
+
         self.output_params=OutputParams(info,
                  thin,
                  out_every,
@@ -523,17 +522,19 @@ class TriLmp():
                  restart_prefix,
                  checkpoint_every,
                  output_format,
-                output_flag,
-                output_counter,
-                performance_increment,
-                energy_increment)
+                 output_flag,
+                 output_counter,
+                 performance_increment,
+                 energy_increment)
 
-        ####################################################
-        #     ENERGY MANAGER INITIALISATION - TRIMEM       #
-        ####################################################
+        ########################################################################
+        #                ENERGY MANAGE INITIALIZATION WITH TRIMEM              #
+        ########################################################################
+
         if self.initialize:
             # setup energy manager with initial mesh
             self.estore = m.EnergyManagerNSR(self.mesh.trimesh, self.eparams)
+
             #safe initial states property
             self.initial_state=InitialState(self.estore.initial_props.area,
                                             self.estore.initial_props.volume,
@@ -561,116 +562,162 @@ class TriLmp():
 
             #recreate energy manager
             self.estore = m.EnergyManagerNSR(self.mesh.trimesh, self.eparams, self.init_props)
-       # save general lengthscale, i.e. membrane bead "size" defined by tether repulsion onset
-        self.l0 = self.estore.eparams.bond_params.lc1 / 0.75
 
-    ########################################
-    #         MASSES OF PARTICLES          #
-    ########################################
-    # set Mass Vector (vector of all masses (vertices + beads)
-        self.masses = []
-        for i in range(self.n_vertices):
-            self.masses.append(self.algo_params.momentum_variance)
+        # save general lengthscale, i.e. membrane bead "size" defined by tether repulsion onset
+        self.l0 = 1.0 # MMB HARDCODED: LENGTH SCALE OF SYSTEM IS ALWAYS SIGMA = 1
 
-        if self.beads.n_beads:
-            if self.beads.n_types > 1:
-                for i in range(self.beads.n_beads):
-                    self.masses.append(self.beads.masses[self.beads.types[i]-2])
-            else:
-                for i in range(self.beads.n_beads):
-                    self.masses.append(self.beads.masses)
-        self.masses=np.asarray(self.masses)
+        ########################################################################
+        #                           BEADS/NANOPARTICLES                        #
+        ########################################################################
 
+        self.beads=Beads(n_types,
+                         bead_int,
+                         bead_int_params,
+                         bead_pos,
+                         bead_vel,
+                         bead_sizes,
+                         bead_masses,
+                         bead_types,
+                         self_interaction,
+                         self_interaction_params)
 
+        ########################################################################
+        #                             EXTENSION: TETHERS                      #
+        ########################################################################
 
-    ##############################################################
-    #                     LAMMPS SETUP                           #
-    ##############################################################
-
-
-        # create internal lammps instance
-        self.lmp = lammps(cmdargs=['-sf','omp'])
-        self.L = PyLammps(ptr=self.lmp,verbose=False)
-
-        ###########################################
-        #            Optional Tethers             #
-        ###########################################
-        #default
         bond_text="""
                     special_bonds lj/coul 0.0 0.0 0.0
                     bond_style zero nocoeff
                     bond_coeff * * 0.0  """
-        n_bond_types=1
+
         n_tethers=0
         add_tether=False
+
         #added tethers
         if self.beads.bead_interaction=='tether':
             add_tether=True
             n_tethers=self.beads.n_beads
-            n_bond_types=2
+            n_bond_types+=1
             bond_text=f"""
             special_bonds lj/coul 0.0 0.0 0.0
             bond_style hybrid zero harmonic
             bond_coeff 1 zero 0.0
             bond_coeff 2 harmonic {self.beads.bead_interaction_params[0]} {self.beads.bead_interaction_params[1]}
             special_bonds lj/coul 0.0 0.0 0.0
-            
+
             """
 
-        ############################################################
-        #        MAIN INPUT SCRIPT USED IN LAMMPS                  #
-        ############################################################
-        #  For significant changes to functionality                #
-        #  this section might have to be altered                   #
-        #  Further LAMMPS scipts used to setup lammps are          #
-        #  defined as function in the end of this class definition.#
-        #  CAVEAT: Currently all the scripts and the callback to   #
-        #  TRIMEM are critically reliant on the the setting:       #
-        # " atom_modify sort 0 0.0 "                               #
-        ############################################################
+        ########################################################################
+        #             EXTENSION: ELASTIC MEMBRANE/SLAYER                       #
+        ########################################################################
+
+        self.n_slayer           = 0
+        self.slayer             = slayer
+        self.slayer_points      = slayer_points
+        self.slayer_bonds       = slayer_bonds
+        self.slayer_dihedrals   = slayer_dihedrals
+        self.slayer_kbond       = slayer_kbond
+        self.slayer_rlbond      = slayer_rlbond
+        self.slayer_kdihedral   = slayer_kdihedral
+        self.n_slayer_dihedrals = 0
+        self.n_slayer_bonds     = 0
+        self.slayer_flag        = 0
+
+        if self.slayer:
+            self.n_slayer           = len(self.slayer_points)
+            self.n_slayer_dihedrals = len(self.slayer_dihedrals)
+            self.n_slayer_bonds     = len(self.slayer_bonds)
+            self.slayer_flag        = 1
+            n_bond_types+=1
+            bond_text=f"""
+                        special_bonds lj/coul 0.0 0.0 0.0
+                        bond_style hybrid zero nocoeff harmonic
+                        bond_coeff 1 zero 0.0
+                        bond_coeff 2 harmonic {self.slayer_kbond} {self.slayer_rlbond}
+                        dihedral_style harmonic
+                        dihedral_coeff 1 {self.slayer_kdihedral} 1 1
+                    """
+
+        ########################################################################
+        #                   EXTENSION: RIGID SYMBIONT                          #
+        ########################################################################
+
+        self.fix_rigid_symbiont             = fix_rigid_symbiont
+        self.fix_rigid_symbiont_coordinates = fix_rigid_symbiont_coordinates
+        self.fix_rigid_symbiont_nparticles  =   0
+        self.fix_rigid_symbiont_flag        = 0
+
+        if self.fix_rigid_symbiont:
+            self.fix_rigid_symbiont_nparticles  = len(self.fix_rigid_symbiont_coordinates)
+            self.fix_rigid_symbiont_interaction = fix_rigid_symbiont_interaction
+            self.fix_rigid_symbiont_params      = fix_rigid_symbiont_params
+            self.fix_rigid_symbiont_flag        = 1
+
+            if len(self.fix_rigid_symbiont_params)<1:
+                print("ERROR: Not enough parameters for fix rigid symbiont")
+                sys.exit(1)
+
+        ########################################################################
+        #          LAMMPS SETUP AND COMMANDS REQUIRED DURING INIT              #
+        #  CAVEAT: Currently all the scripts and the callback to               #
+        # TRIMEM are critically reliant on the the setting:                    #
+        # " atom_modify sort 0 0.0 " in the input file                         #
+        ########################################################################
+
+        # create internal lammps instance
+        self.lmp = lammps(cmdargs=['-sf','omp'])
+        self.L = PyLammps(ptr=self.lmp,verbose=False)
+        total_particle_types = num_particle_types # 1+self.beads.n_types
+
+        # define atom_style
+        atom_style_text = "hybrid bond charge"
+        bond_dihedral_text = f"bond/types {n_bond_types}"
+        # modifications to atom_style if s-layer/elastic membrane exists
+        if self.slayer:
+            atom_style_text = "full" # molecular (we need dihedrals) + charge
+            bond_dihedral_text+=" dihedral/types 1"
+            bond_dihedral_text+=" extra/dihedral/per/atom 14"
+        
+        boundary_string = self.parse_boundary(periodic)
+
         basic_system = dedent(f"""\
             units lj
             dimension 3
             package omp 0
-            
-            atom_style	hybrid bond charge 
+            boundary {boundary_string}
+
+            atom_style    {atom_style_text}
             atom_modify sort 0 0.0
-            
 
             region box block {self.algo_params.box[0]} {self.algo_params.box[1]} {self.algo_params.box[2]} {self.algo_params.box[3]} {self.algo_params.box[4]} {self.algo_params.box[5]}
-            create_box {1+self.beads.n_types} box bond/types {n_bond_types} extra/bond/per/atom 14 extra/special/per/atom 14
-                
+            create_box {total_particle_types} box {bond_dihedral_text} extra/bond/per/atom 14 extra/special/per/atom 14
+
             run_style verlet
-            fix 1 all  nve
             fix ext all external pf/callback 1 1
-            
+
             timestep {self.algo_params.step_size}
 
-            {block(bond_text)}            
-            
+            {block(bond_text)}
+
             dielectric  1.0
             compute th_ke all ke
             compute th_pe all pe pair bond
-            
-            thermo {self.algo_params.traj_steps}                                        
+
+            thermo {self.algo_params.traj_steps}
             thermo_style custom c_th_pe c_th_ke
             thermo_modify norm no
-            
-            info styles compute out log
 
+            info styles compute out log
             echo log
-            log none
-            
+
         """)
 
-        # initialize lammps
+        # introduce preamble/basic system description in lammps
         self.lmp.commands_string(basic_system)
 
-
-        
-
-
-        # VERTICES + TOPOLOGY + BEADS + TETHERS    
+        # LAMMPS ...............................................................
+        # INPUT FILE DEFINITION
+        # LAMMPS ...............................................................
 
         # extract bond topology from Trimesh object
         self.edges = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f).edges_unique
@@ -678,52 +725,70 @@ class TriLmp():
         self.n_edges=self.edges.shape[0]
 
         with open('sim_setup.in', 'w') as f:
+
             f.write('\n\n')
+            f.write(f'{self.mesh.x.shape[0]+self.beads.n_beads+self.n_slayer+self.fix_rigid_symbiont_nparticles} atoms\n')
+            f.write(f'{num_particle_types} atom types\n')
+            f.write(f'{self.edges.shape[0]+n_tethers+self.n_slayer_bonds} bonds\n')
+            f.write(f'{n_bond_types} bond types\n\n')
+            # include dihedrals for s-layer
+            if self.slayer:
+                f.write(f'{self.n_slayer_dihedrals} dihedrals\n')
+                f.write(f'1 dihedral types\n\n')
 
-            f.write(f'{self.mesh.x.shape[0]+self.beads.n_beads} atoms\n')
-            f.write(f'{self.edges.shape[0]+n_tethers} bonds\n\n')
-
-            f.write(f'{1+self.beads.n_types} atom types\n')
-            if add_tether:
-                f.write(f'2 bond types\n\n')
-            else:
-                f.write(f'1 bond types\n\n')
-
-          #  f.write('Bond Coeffs\n\n')
-          #  f.write(f'1 zero nocoeff\n')
-          #  if add_tether:
-          #      f.write(f'2 harmonic {self.beads.bead_interaction_params[0]} {self.beads.bead_interaction_params[1]}\n')
-
-
+            # particle masses
             f.write('Masses\n\n')
-            f.write(f'1 {self.algo_params.momentum_variance}\n')
-            if self.beads.n_beads:
-                for i in range(self.beads.n_types):
+            for part_types in range(num_particle_types):
+                f.write(f'{part_types+1} {mass_particle_type[part_types]}\n')
+            f.write('\n')
+
+            # [COORDINATES] STANDARD SIMULATION SET-UP: only membrane and potentially nanoparticles
+            if (not self.slayer) and (not self.fix_rigid_symbiont):
+                f.write(f'Atoms # hybrid\n\n')
+                for i in range(self.n_vertices):
+                    f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+
+                if self.beads.n_beads:
                     if self.beads.n_types>1:
-
-                        f.write(f'{i+2} {self.beads.masses[i]}\n')
+                        for i in range(self.beads.n_beads):
+                            f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
                     else:
-                        f.write(f'{i + 2} {self.beads.masses}\n')
+                        for i in range(self.beads.n_beads):
+                            f.write(f'{self.n_vertices+1+i} 2 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
 
+            # [COORDINATES] EXTENSION: SIMULATION WITH AN SLAYER
+            elif self.slayer:
+                f.write(f'Atoms # full\n\n')
+                # membrane vertices (type 1)
+                for i in range(self.n_vertices):
+                    f.write(f'{i + 1} 0 1 1.0 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} \n')
+                # slayer vertices (type 2)
+                for i in range(self.n_slayer):
+                    f.write(f'{self.n_vertices+i+1} 0 2 1.0 {self.slayer_points[i, 0]} {self.slayer_points[i, 1]} {self.slayer_points[i, 2]}\n')
 
-            f.write(f'Atoms # hybrid\n\n')
-            for i in range(self.n_vertices):
-                f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+            # [COORDINATES] EXTENSION: SIMULATION WITH RIGID SYMBIONTS
+            elif self.fix_rigid_symbiont:
 
-            if self.beads.n_beads:
-                if self.beads.n_types>1:
-                    for i in range(self.beads.n_beads):
-                        f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
-                else:
-                    for i in range(self.beads.n_beads):
-                        f.write(f'{self.n_vertices+1+i} 2 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
+                f.write(f'Atoms # hybrid\n\n')
+                # membrane particles are type 1
+                for i in range(self.n_vertices):
+                    f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+                # symbiont/nanoparticles particles are type 2
+                for i in range(self.fix_rigid_symbiont_nparticles):
+                    f.write(f'{self.n_vertices + i + 1} 2  {self.fix_rigid_symbiont_coordinates[i, 0]} {self.fix_rigid_symbiont_coordinates[i, 1]} {self.fix_rigid_symbiont_coordinates[i, 2]} 1 1.0 \n')
 
+            # [BONDS]
+            if self.slayer == False:
+                f.write(f'Bonds # zero special\n\n')
+            else:
+                f.write(f'Bonds # hybrid\n\n')
 
-            # f.write(f'{self.mesh.x.shape[0]+1} {self.mesh.x[0,0]} {self.mesh.x[0,1]} {self.mesh.x[0,2]} 1 2\n')
-            f.write(f'Bonds # zero special\n\n')
-
+            # first type of bond -- for the fluid membrane
             for i in range(self.edges.shape[0]):
                 f.write(f'{i + 1} 1 {self.edges[i, 0] + 1} {self.edges[i, 1] + 1}\n')
+            # second type of bond -- for the slayer
+            for i in range(self.n_slayer_bonds):
+                f.write(f'{self.edges.shape[0] + i + 1} 2 {self.slayer_bonds[i, 0] + self.n_vertices} {self.slayer_bonds[i, 1] + self.n_vertices}\n')
 
             if add_tether:
                 for i in range(n_tethers):
@@ -735,54 +800,124 @@ class TriLmp():
                             d_temp=d_temp2
                             h=j
 
-
                     f.write(f'{self.edges.shape[0]+1+i} 2 {h+1} {self.n_vertices+1+i}\n')
 
+            # [DIHEDRALS] Only applicable to S-LAYER/elastic membrane
+            if self.slayer:
+                f.write(f'Dihedrals # harmonic\n\n')
+                for i in range(self.n_slayer_dihedrals):
+                    f.write(f'{i + 1} 1 {self.slayer_dihedrals[i, 0] +self.n_vertices} {self.slayer_dihedrals[i, 1]  +self.n_vertices} {self.slayer_dihedrals[i, 2]  +self.n_vertices} {self.slayer_dihedrals[i, 3]  +self.n_vertices}\n')
 
-        self.lmp.commands_string(self.pair_cmds())
-
-        if self.beads.n_beads:
-            self.lmp.commands_string("neigh_modify one 5000 page 50000 every 100 check yes")
-
-        # initialize LAMMPS
+        # pass all the initial configuration data to LAMMPS to read
         self.lmp.command('read_data sim_setup.in add merge')
 
+        # LAMMPS ...............................................................
+        # TABLE FOR SURFACE REPULSION
+        # MW with modifications from MMB
+        # Create python file implementing the repulsive part of the tether potential
+        # as surface repulsion readable by the lammps pair_style
+        # python uses the pair_style defined above to create a lookup
+        # table used as actual pair_style in the vertex-vertex interaction in Lammps
+        # is subject to 1-2, 1-3 or 1-4 neighbourhood exclusion of special bonds
+        # used to model the mesh topology
+        # LAMMPS ...............................................................
 
-        # THERMOSTAT/VELOCITIES SETTINGS            #
-        self.atom_props = f"""     
-                        velocity vertices create {self.algo_params.initial_temperature} 1298371 mom yes dist gaussian 
+        with open('trilmp_srp_pot.py','w') as f:
+
+            f.write(dedent(f"""\
+            import numpy as np
+
+            class LAMMPSPairPotential(object):
+                def __init__(self):
+                    self.pmap=dict()
+                    self.units='lj'
+                def map_coeff(self,name,ltype):
+                    self.pmap[ltype]=name
+                def check_units(self,units):
+                    if (units != self.units):
+                        raise Exception("Conflicting units: %s vs. %s" % (self.units,units))
+
+            class SRPTrimem(LAMMPSPairPotential):
+                def __init__(self):
+                    super(SRPTrimem,self).__init__()
+                    # set coeffs: kappa_r, cutoff, r (power)
+                    #              4*eps*sig**12,  4*eps*sig**6
+                    self.units = 'lj'
+                    self.coeff = {{'C'  : {{'C'  : ({self.eparams.repulse_params.lc1},{self.eparams.kappa_r},{self.eparams.repulse_params.r})  }} }}
+
+                def compute_energy(self, rsq, itype, jtype):
+                    coeff = self.coeff[self.pmap[itype]][self.pmap[jtype]]
+
+                    srp1 = coeff[0]
+                    srp2 = coeff[1]
+                    srp3 = coeff[2]
+                    r = np.sqrt(rsq)
+                    rl=r-srp1
+
+                    e=0.0
+                    e+=np.exp(r/rl)
+                    e/=r**srp3
+                    e*=srp2
+
+                    return e
+
+                def compute_force(self, rsq, itype, jtype):
+                    coeff = self.coeff[self.pmap[itype]][self.pmap[jtype]]
+                    srp1 = coeff[0]
+                    srp2 = coeff[1]
+                    srp3 = coeff[2]
+
+                    r = np.sqrt(rsq)
+                    f=0.0
+
+                    rp = r ** (srp3 + 1)
+                    rl=r-srp1
+                    f=srp1/(rl*rl)+srp3/r
+                    f/=rp
+                    f*=np.exp(r/rl)
+                    f*=srp2
+
+                    return f
+            """))
+        # write down the table for surface repulsion
+        self.lmp.commands_string(dedent(f"""\
+        pair_style python {self.eparams.repulse_params.lc1}
+        pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
+        shell rm -f trimem_srp.table
+        pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp 1.0 1.0
+        pair_style none
+        """))
+
+        # get the 'table' interaction to work
+        self.lmp.commands_string(dedent(f"""\
+        pair_style hybrid/overlay table linear 2000 lj/cut 2.5
+        pair_modify pair table special lj/coul 0.0 0.0 0.0 tail no
+        pair_coeff 1 1 table trimem_srp.table trimem_srp
+        pair_coeff * * lj/cut 0 0 0
+        """))
+
+        # LAMMPS ...............................................................
+        # GROUPS
+        # LAMMPS ...............................................................
+
+        # define particle groups
+        for pg in range(num_particle_types):
+            self.lmp.command(f'group {group_particle_type[pg]} type {pg+1}')
+
+        # LAMMPS ...............................................................
+        # VELOCITIES
+        # LAMMPS ...............................................................
+
+        # velocity settings
+        self.atom_props = f"""
+                        velocity {group_particle_type[0]} create {self.algo_params.initial_temperature} 1298371 mom yes dist gaussian
                         """
-
-        #group together different types
-        self.lmp.command('group vertices type 1')
-        for i in range(self.beads.n_types):
-            self.lmp.command(f'group beads_{i+2} type {i+2}')
-
-        # Langevin thermostat for all beads scaling each particle type according to it's size and mass (M/sigma)
-        if self.algo_params.langevin_thermostat:
-            sc0=self.algo_params.momentum_variance/self.l0
-            bds = ''
-            if self.beads.n_types:
-                if self.beads.n_types>1:
-                    bds = ''
-                    for i in range(self.beads.n_types):
-                        bds += f'scale {i + 2} {(self.beads.masses[i] / self.beads.bead_sizes[i])/sc0} '
-                else:
-                    bds=f'scale 2 {(self.beads.masses / self.beads.bead_sizes)/sc0} '
-
-            lv_thermo_comm=f"""
-                            fix lvt all langevin {self.algo_params.initial_temperature} {self.algo_params.initial_temperature}  {self.algo_params.langevin_damp} {self.algo_params.langevin_seed} zero yes {bds}
-                            
-                            """
-            self.lmp.commands_string(lv_thermo_comm)
-
 
         # initialize random velocities if thermal velocities is chosen or set to 0
         if self.algo_params.thermal_velocities:
             self.lmp.commands_string(self.atom_props)
         else:
             self.lmp.command('velocity all zero linear')
-
 
         # setting or reinitializing bead velocities
         if np.any(self.beads.velocities):
@@ -793,17 +928,14 @@ class TriLmp():
         if np.any(self.mesh_velocity):
             for i in range(self.n_vertices):
                 self.L.atoms[i].velocity=self.mesh_velocity[i,:]
-        
-        # INTERACTIONS  and TRIMEM callback
-        
+
+        # LAMMPS ...............................................................
+        # INTERACTIONS AND TRIMEM CALLBACK (NOT TOUCHING!)
+        # LAMMPS ...............................................................
+
         # set callback for helfrich gradient to be handed from TRIMEM to LAMMPS via fix external "ext"
         self.lmp.set_fix_external_callback("ext", self.callback_one, self.lmp)
 
-        if self.algo_params.additional_command:
-            self.lmp.commands_string(self.algo_params.additional_command)
-
-
-        # set temperature TODO: no implementation of the simulated annealing for MD mode yet
         # Temperature in LAMMPS set to fixed initial temperature
         self.T = self.algo_params.initial_temperature
 
@@ -814,13 +946,9 @@ class TriLmp():
         self.he=self.estore.energy(self.mesh.trimesh)#+0.5 * v.ravel().dot(v.ravel())
         self.energy_new=0.0
 
-
-        #setting and getting helffrich energy from/to lammps
-        #self.lmp.fix_external_set_energy_global("ext", self.estore.energy(self.mesh.trimesh))
-        #print(self.lmp.numpy.extract_fix("ext", LMP_STYLE_GLOBAL, LMP_TYPE_SCALAR, nrow=0))
-        
-        # BOOKKEEPING
-        # Setting up counters for stats and writers
+        ########################################################################
+        #                           BOOK-KEEPING                               #
+        ########################################################################
 
         # flip stats
         self.f_i = 0
@@ -833,33 +961,32 @@ class TriLmp():
         self.m_acc = 0
 
         self.counter = Counter(move=move_count, flip=flip_count)
-        self.timer = Timer(ptime, ptimestamp, timearray, timearray_new,dtimestamp,stime)
+        self.timer   = Timer(ptime, ptimestamp, timearray, timearray_new,dtimestamp,stime)
 
         self.cpt_writer = self.make_checkpoint_handle()
-        self.process=psutil.Process()
-        self.n= self.algo_params.num_steps // self.output_params.info if self.output_params.info!=0 else 0.0
+        self.process    = psutil.Process()
+        self.n          = self.algo_params.num_steps // self.output_params.info if self.output_params.info!=0 else 0.0
 
-
-        self.info_step = max(self.output_params.info, 0)
-        self.out_step = max(self.output_params.thin, 0)
-        self.cpt_step = max(self.output_params.checkpoint_every, 0)
+        self.info_step    = max(self.output_params.info, 0)
+        self.out_step     = max(self.output_params.thin, 0)
+        self.cpt_step     = max(self.output_params.checkpoint_every, 0)
         self.refresh_step = max(self.algo_params.refresh, 0)
 
-       #####                   TRAJECTORY WRITER SETTINGS                        #####
-       ###############################################################################
+        ########################################################################
+        #                       TRAJECTORY WRITERS                             #
+        ########################################################################
+
         if self.output_params.output_format=='xyz' or self.output_params.output_format=='vtu' or self.output_params.output_format=='xdmf':
              self.output = lambda i : make_output(self.output_params.output_format, self.output_params.output_prefix,
                                   self.output_params.output_counter, callback=self.update_output_counter)
         if self.output_params.output_format == 'lammps_txt':
             def lammps_output(i):
                self.L.command(f'write_data {self.output_params.output_prefix}.s{i}.txt')
-
             self.output = lambda i: lammps_output(i)
 
         if self.output_params.output_format == 'lammps_txt_folder':
             def lammps_output(i):
                 self.L.command(f'write_data lmp_trj/{self.output_params.output_prefix}.s{i}.txt')
-
             os.system('mkdir -p lmp_trj')
             self.output=lambda i: lammps_output(i)
 
@@ -868,17 +995,17 @@ class TriLmp():
             self.h5writer._init_struct(self.lmp,self.mesh,self.beads,self.estore)
             self.output = lambda i: self.h5writer._write_state(self.lmp,self.mesh,i)
 
-       #############################################################################
-        #####                           FLIPPING                                #####
-        #############################################################################
-        #  In this section the serial or parallel flipping method is chosen         #
-        #  and functions forwarding the updated topology to LAMMPS are defined      #
-        #  we use the flip function flip_nsr/pflip_nsr which are reliant on the     #
-        #  the use of the estore_nsr. Hence we shut off the calculation of surface  #
-        #  repusion in TRIMEM. If for some reason this functionality should be n    #
-        #  needed one would have to remove all '_nsr' suffixes and use the          #
-        #  estore.eparams.repulse_params which are kept for backwards portability   #
-        #############################################################################
+        ########################################################################
+        #                   EDGE-FLIPPING (MEMBRANE FLUIDITY)                  #
+        # MW: In this section the serial or parallel flipping method is chosen #
+        # and functions forwarding the updated topology to LAMMPS are defined. #
+        # We use the flip function flip_nsr/pflip_nsr which are reliant on     #
+        # the the use of the estore_nsr. Hence we shut off the calculation     #
+        # of surface repusion in TRIMEM. If for some reason this functionality #
+        # should be needed one would have to remove all '_nsr' suffixes        #
+        # and use the estore.eparams.repulse_params which are kept for         #
+        # backwards portability                                                #
+        ########################################################################
 
         # chosing function to be used for flipping
         if self.algo_params.flip_type == "none" or self.algo_params.flip_ratio == 0.0:
@@ -889,6 +1016,15 @@ class TriLmp():
             self._flips = lambda: m.pflip_nsr(self.mesh.trimesh, self.estore, self.algo_params.flip_ratio)
         else:
             raise ValueError("Wrong flip-type: {}".format(self.algo_params.flip_type))
+
+        ########################################################################
+        #                       END OF INIT                                    #
+        ########################################################################
+
+
+    ############################################################################
+    #               *SELF FUNCTIONS*: FLIP STEP FUNCTIONS                      #
+    ############################################################################
 
     # test function to perform a single flip in lammps from (i,j)-> (k,l)
     def lmp_flip_single(self,i,j,k,l):
@@ -928,9 +1064,7 @@ class TriLmp():
         else:
             pass
 
-
-
-
+    # print flip information
     def flip_info(self):
         """Print algorithmic information."""
         i_total = sum(self.counter.values())
@@ -941,7 +1075,7 @@ class TriLmp():
             self.acceptance_rate = ar
             #print("Accepted", self.f_acc)
             #print("Number of candidate edges", n_edges)
-            
+
             print("\n-- MCFlips-Step ", self.counter["flip"])
             print("----- flip-accept: ", ar)
             print("----- flip-rate:   ", self.algo_params.flip_ratio)
@@ -950,6 +1084,7 @@ class TriLmp():
             self.f_num = 0
             self.f_att = 0
 
+    # the actual flip step
     def flip_step(self):
         """Make one step."""
         flip_ids=self._flips()
@@ -964,19 +1099,18 @@ class TriLmp():
         self.f_i += 1
         self.counter["flip"] += 1
 
+    ############################################################################
+    #             *SELF FUNCTIONS*: HYBRID MONTE CARLO (MC + MD) SECTION       #
+    # MW: In this section we combine all functions that are used for           #
+    # either HMC/pure_MD run or minimize including the wrapper                 #
+    # functions used for updating the mesh (on the TRIMEM side)                #
+    # when evaluating the gradient                                             #
+    ############################################################################
 
-    ################################################################
-    #                 MOLECULAR DYNAMICS / HMC                     #
-    ################################################################
-    # In this section we combine all functions that are used for   #
-    # either HMC/pure_MD run or minimize including the wrapper     #
-    # functions used for updating the mesh (on the TRIMEM side)    #
-    # when evaluating the gradient                                 #
-    ################################################################
-
-
-
+    # MD stage of the code
     def hmc_step(self):
+
+        # in practice never used - MMB UNTOUCHED
         if not self.algo_params.pure_MD:
 
             # setting temperature
@@ -988,13 +1122,12 @@ class TriLmp():
             self.mesh_temp=copy(self.mesh.x)
             self.beads_temp=copy(self.beads.positions)
 
-            #calute energy
-            #future make a flag system to avoid double calculation if lst step was also hmc step
+            #calute energy - future make a flag system to avoid double calculation if lst step was also hmc step
             if self.algo_params.thermal_velocities:
-                 self.atom_props = f"""     
-                            
-                            velocity        vertices create {self.T} {np.random.randint(1,9999999)} mom yes dist gaussian   
-    
+                 self.atom_props = f"""
+
+                            velocity        vertices create {self.T} {np.random.randint(1,9999999)} mom yes dist gaussian
+
                             """
                  self.lmp.commands_string(self.atom_props)
                  v = self.lmp.numpy.extract_atom("v")
@@ -1091,14 +1224,15 @@ class TriLmp():
             self.m_i += 1
             self.counter["move"] += 1
 
+
+        # actual MD run of the code
         else:
-            self.lmp.command(f'run {self.algo_params.traj_steps} post no')
+            self.lmp.command(f'run {self.algo_params.traj_steps} pre no post no')
             self.m_acc += 1
             self.m_i += 1
-
             self.counter["move"] += 1
 
-
+    # print MD stage information
     def hmc_info(self):
         """Print algorithmic information."""
         i_total = sum(self.counter.values())
@@ -1111,11 +1245,26 @@ class TriLmp():
             self.m_acc = 0
             self.m_i = 0
 
-    ##################
-    #      RUN!      #
-    ###################################################
-    #       COMBINED MOVE FOR SIMULATION              #
-    ###################################################
+    ############################################################################
+    #                        *SELF FUNCTIONS*: RUN                             #
+    # MW: In this section we combine all functions that are used for           #
+    # either HMC/pure_MD run or minimize including the wrapper                 #
+    # functions used for updating the mesh (on the TRIMEM side)                #
+    # when evaluating the gradient                                             #
+    ############################################################################
+
+    def halt_symbiont_simulation(self, step, check_outofrange, check_outofrange_freq, check_outofrange_cutoff):
+        if (self.equilibrated) and (check_outofrange) and (step%check_outofrange_freq ==0):
+            pos_alloc=self.lmp.numpy.extract_atom("x")
+            self.mesh.x[:] = np.array(pos_alloc[:self.n_vertices])
+            self.beads.positions[:] = np.array(pos_alloc[self.n_vertices:self.n_vertices+self.beads.n_beads])
+            distance_beads_nanoparticle = np.sqrt((self.mesh.x[:, 0] - self.beads.positions[0,0])**2 + (self.mesh.x[:, 1] - self.beads.positions[0,1])**2 + (self.mesh.x[:, 2] - self.beads.positions[0,2])**2)
+            if np.all(distance_beads_nanoparticle > check_outofrange_cutoff):
+                fileERROR = open("ERROR_REPORT.dat", "w")
+                fileERROR.writelines(f"Nanoparticle reached cutoff range at step {step}")
+                fileERROR.close()
+                sys.exit(0)
+
     def step_random(self):
 
         """Make one step each with each algorithm."""
@@ -1123,7 +1272,7 @@ class TriLmp():
             t_fix = time.time()
             self.hmc_step()
             self.timer.timearray_new[0] += (time.time() - t_fix)
-
+            self.MDstep +=1
         else:
             t_fix = time.time()
             self.flip_step()
@@ -1140,32 +1289,159 @@ class TriLmp():
         self.flip_step()
         self.timer.timearray_new[1] += (time.time() - t_fix)
 
+    def raise_errors_run(self, integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near):
+        if check_outofrange and (check_outofrange_freq<0 or check_outofrange_cutoff<0):
+            print("ERROR: Incorrect check_outofrange parameters")
+            sys.exit(1)
 
-    def run(self,N=0):
+        if self.slayer and self.n_beads!=0:
+            print("ERROR: Slayer is true, but n_beads is non zero. This simulation set-up is not possible.")
+            sys.exit(1)
+
+        if self.beads.n_types>0 and fix_symbionts_near==False:
+            print("ERROR: Simulation contains beads that may not be correctly positioned.")
+            sys.exit(1)
+
+        if fix_symbionts_near and self.beads.n_types==0:
+            print("ERROR: No symbiont to place near.")
+            sys.exit(1)
+
+        if not integrators_defined:
+            print("ERROR: You have not defined a single integrator.")
+            sys.exit(1)
+
+        print("No errors to report for run. Simulation begins.")
+
+    def run(
+            self, N=0, integrators_defined = False, check_outofrange = False, 
+            check_outofrange_freq = -1, check_outofrange_cutoff = -1, fix_symbionts_near = True, 
+            postequilibration_lammps_commands = None
+        ):
+
+        """
+        MAIN TRILMP FUNCTION: Combine MD + MC runs
+
+        Parameters:
+
+        - N : number of program steps
+        
+
+        - check_outofrange : check whether single symbiont is too far from membrane
+            Additional parameters:
+                - check_outofrange_freq: how often to check for event
+                - check_outofrange_cutoff: when to consider (distance-wise) event has happened
+
+        - fix_symbionts_near : place symbionts within interaction range of membrane
+        """
+
+        # check whether there is any initialization error
+        self.raise_errors_run(integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near)
+
+        # determine length simulation
         if N==0:
             N=self.algo_params.num_steps
-
         if self.algo_params.switch_mode=='random':
             self.step = lambda: self.step_random()
-            sim_steps=N
         elif self.algo_params.switch_mode=='alternating':
             self.step = lambda: self.step_alternate()
-            sim_steps=np.int64(np.floor(N/2))
         else:
             raise ValueError("Wrong switchmode: {}. Use 'random' or 'alternating' ".format(self.algo_params.flip_type))
+        
+        # counters for MD steps
+        i = -1
+        self.MDsteps = 0
 
-        for i in range(sim_steps):
+        # run simulation for dictated number
+        # of MD steps
+        while self.MDsteps<N:
+
+            # counter for updates and so on
+            i+=1
+
+            # the program MC + MD
             self.step()
             self.hmc_info()
             self.callback(np.copy(self.mesh.x),self.counter)
             self.flip_info()
 
+            # check if simulation must stop
+            self.halt_symbiont_simulation(i, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
 
-    ################################################
-    #         WRAPPER FUNCTIONS                    #
-    ################################################
+            # post equilibration update, if it applies
+            if i==self.equilibration_rounds:
 
-    # Decorators for meshupdates when calling force function
+                # place symbionts near
+                if fix_symbionts_near:
+
+                    # extract the coordinates of the membrane vertices and beads
+                    pos_alloc=self.lmp.numpy.extract_atom("x")
+                    self.mesh.x[:] = pos_alloc[:self.n_vertices]
+                    self.beads.positions[:] = pos_alloc[self.n_vertices:self.n_vertices+self.beads.n_beads]
+
+                    # interaction single symbiont
+                    if self.beads.n_beads==1:
+                        coord_bead = self.mesh.x[0]
+                        rtemp      = np.sqrt(coord_bead[0]**2 + coord_bead[1]**2 + coord_bead[2]**2)
+                        buffering  = 1.1
+                        sigma_tilde = 0.5*(1+self.beads.bead_sizes)
+                        x = coord_bead[0] + buffering*sigma_tilde*coord_bead[0]/rtemp
+                        y = coord_bead[1] + buffering*sigma_tilde*coord_bead[1]/rtemp
+                        z = coord_bead[2] + buffering*sigma_tilde*coord_bead[2]/rtemp
+
+                        # make sure that lammps knows about this
+                        atoms_alloc = self.L.atoms
+                        atoms_alloc[self.n_vertices].position[0] = x
+                        atoms_alloc[self.n_vertices].position[1] = y
+                        atoms_alloc[self.n_vertices].position[2] = z
+
+                    # multiple symbionts on shell
+                    elif self.beads.n_beads>1:
+                        buffering =1.05
+                        sigma_tilde = 0.5*(1+self.beads.bead_sizes)
+                        n = self.beads.n_beads
+                        goldenRatio = (1+5**0.5)/2
+                        i = np.arange(0, n)
+                        theta = 2*np.pi*i/goldenRatio
+                        phi = np.arccos(1-2*(i+0.5)/n)
+                        r = np.sqrt(self.mesh.x[0, 0]**2 + self.mesh.x[0, 1]**2 + self.mesh.x[0, 2]**2)
+                        r += 1.1*sigma_tilde
+                        x, y, z = r*np.cos(theta)*np.sin(phi), r*np.sin(theta)*np.sin(phi), r*np.cos(phi)
+
+                        atoms_alloc = self.L.atoms
+                        for q in range(self.beads.n_beads):
+                            min_distance = 1000
+                            xx, yy, zz = x[q], y[q], z[q]
+                            for qq in range(self.n_vertices):
+                                xv = self.mesh.x[qq, 0]
+                                yv = self.mesh.x[qq, 1]
+                                zv = self.mesh.x[qq, 2]
+                                distance = np.sqrt((xv-xx)**2 + (yv-yy)**2 + (zv-zz)**2)
+                                if distance < min_distance:
+                                    min_distance = distance
+                                    index = qq
+
+                            xtemp = self.mesh.x[index, 0]
+                            ytemp = self.mesh.x[index, 1]
+                            ztemp = self.mesh.x[index, 2]
+                            rtemp = np.sqrt(xtemp**2 + ytemp**2 + ztemp**2)
+
+                            atoms_alloc[self.n_vertices+q].position[0] = xtemp + 1.05*sigma_tilde*xtemp/rtemp
+                            atoms_alloc[self.n_vertices+q].position[1] = ytemp + 1.05*sigma_tilde*ytemp/rtemp
+                            atoms_alloc[self.n_vertices+q].position[2] = ztemp + 1.05*sigma_tilde*ztemp/rtemp
+
+                # change status of the membrane
+                self.equilibrated = True
+
+                # add commands that you would like LAMMPS to know of after the equilibration
+                if postequilibration_lammps_commands:
+                    for command in postequilibration_lammps_commands:
+                        self.lmp.commands_string(command)
+
+    ############################################################################
+    #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
+    ############################################################################
+
+    # decorators for meshupdates when calling force function
     def _update_mesh(func):
         """VARIANT FOR USE WITH self.minim():Decorates a method with an update of the mesh vertices.
 
@@ -1178,7 +1454,6 @@ class TriLmp():
         wrap.__doc__  = func.__doc__
         wrap.__name__ = func.__name__
         return wrap
-
 
     def _update_mesh_one(func):
         """VARIANT FOR USE WITH LAMMPS: Decorates a method with an update of the mesh vertices.
@@ -1215,8 +1490,7 @@ class TriLmp():
         #print(np.max(f))
         # self.lmp.fix_external_set_energy_global("ext", self.estore.energy(self.mesh.trimesh))
 
-
-    #### for minimization
+    # for minimization
     @_update_mesh
     def fun(self, x):
         """Evaluate energy.
@@ -1258,12 +1532,11 @@ class TriLmp():
         """
         return self._ravel(self.estore.gradient(self.mesh.trimesh))
 
+    ############################################################################
+    #                    *SELF FUNCTIONS*: CALLBACK DURING .run()              #
+    # This functions performs statistics/output/etc. during the simulation run #
+    ############################################################################
 
-    #############################
-    #    CALLBACK DURING .run() #
-    ################################################################################
-    # This functions performs statistics / output / etc. during the simulation run #
-    ################################################################################
     @_update_mesh
     def callback(self,x, steps):
 
@@ -1286,42 +1559,53 @@ class TriLmp():
         Keyword Args:
             kwargs: ignored
         """
+
         i = sum(steps.values()) #py3.10: steps.total()
 
         if self.output_params.info and (i % self.output_params.info == 0):
             print("\n-- Energy-Evaluation-Step ", i)
             self.estore.print_info(self.mesh.trimesh)
+
+        """
+        # MMB CHANGED -- Deal with the putput through LAMMPS
         if self.output_params.thin and (i % self.output_params.thin == 0):
             self.output(i)
             #self.output.write_points_cells(self.mesh.x, self.mesh.f)
-
             #bonds_lmp = self.lmp.numpy.gather_bonds()[:, 1:3]
             #bonds_lmp = np.unique(bonds_lmp, axis=0)
             #bonds_lmp = (np.sort(bonds_lmp, axis=1))
-
             #with open('bonds_topo.xyz','a+') as f:
             #    for i in range(bonds_lmp.shape[0])
             #    f.write(f'{i}')
+        """
 
         if self.output_params.checkpoint_every and (i % self.output_params.checkpoint_every == 0):
             self.cpt_writer()
 
+        # update reference properties?
         self.estore.update_reference_properties()
-
 
         if self.output_params.energy_increment and (i % self.output_params.energy_increment==0):
 
             # MMB CHANGE -- PRINT ENERGIES
             self.ke_new=self.lmp.numpy.extract_compute("th_ke",LMP_STYLE_GLOBAL,LMP_TYPE_SCALAR)
             self.pe_new=self.lmp.numpy.extract_compute("th_pe", LMP_STYLE_GLOBAL, LMP_TYPE_SCALAR)
-            
+
             # MMB compute volume and area of the mesh
             test_mesh = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f)
             mesh_volume = test_mesh.volume
             mesh_area   = test_mesh.area
-            with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
-                f.write(f'{i} {self.estore.energy(self.mesh.trimesh)} {self.ke_new} {self.pe_new} {self.acceptance_rate} {mesh_volume} {mesh_area}\n')
-            
+
+            if self.print_bending_energy:
+                bending_energy_temp = self.estore.properties(self.mesh.trimesh).bending
+
+                with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
+                    f.write(f'{i} {self.estore.energy(self.mesh.trimesh)} {self.ke_new} {self.pe_new} {self.acceptance_rate} {mesh_volume} {mesh_area} {bending_energy_temp}\n')
+            else:
+                with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
+                    f.write(f'{i} {self.estore.energy(self.mesh.trimesh)} {self.ke_new} {self.pe_new} {self.acceptance_rate} {mesh_volume} {mesh_area}\n')
+
+
         if self.output_params.info and (i % self.output_params.info == 0):
             self.timer.timestamps.append(time.time())
             if len(self.timer.timestamps) == 2:
@@ -1366,12 +1650,11 @@ class TriLmp():
                 self.timer.performance_timestamps.pop(0)
                 #{self.process.cpu_percent(interval=None): .4f}
 
-    #####################################
-    #   MINIMIZE HELFRICH HAMILTONIAN   #
-    ###################################################################
-    #       PRECONDITIONING USING STANDARD TRIMEM FUNCTIONALITY       #
-    ###################################################################
-    # See Trimem documentation for details                            #
+    ############################################################################
+    #              *SELF FUNCTIONS*: MINIMIZE HELFRICH HAMILTONIAN             #
+    # MW: Preconditioning using standard trimem functionality                  #
+    # See Trimem documentation for details                                     #
+    ############################################################################
 
     def minim(self):
         """Run (precursor) minimization.
@@ -1432,14 +1715,10 @@ class TriLmp():
         self.reset_counter()
         #self.reset_output_counter()
 
-
-
-
-    #########################################
-    #         CHECKPOINT CREATION           #
-    #####################################################################################
-    #                PICKLE REDUCTION USED FOR CHECKPOINT CREATION!!!                   #
-    #####################################################################################
+    ############################################################################
+    #              *SELF FUNCTIONS*: CHECKPOINT CREATION                       #
+    #  MW   PICKLE REDUCTION USED FOR CHECKPOINT CREATION!!!                   #
+    ############################################################################
 
     def __reduce__(self):
         return self.__class__,(self.initialize,
@@ -1482,15 +1761,9 @@ class TriLmp():
                 self.algo_params.refresh,
 
                 self.algo_params.thermal_velocities,
-                self.algo_params.langevin_thermostat,
-                self.algo_params.langevin_damp,
-                self.algo_params.langevin_seed,
                 self.algo_params.pure_MD,
                 self.algo_params.switch_mode,
                 self.algo_params.box,
-                self.algo_params.additional_command,
-
-
 
                 self.output_params.info,
                 self.output_params.thin,
@@ -1532,7 +1805,6 @@ class TriLmp():
                 self.beads.self_interaction_params
                                )
 
-
     # checkpoints using pickle
     def make_checkpoint_handle(self):
         return self.make_checkpoint
@@ -1557,21 +1829,18 @@ class TriLmp():
 
         print(f'made cp:{cptfname}')
 
-    # SOME UTILITY FUNCTIONS                     
-    # Here we have some minor utility functions to set        
-    # parameters, counters, ....                              
+    # SOME UTILITY FUNCTIONS
+    # Here we have some minor utility functions to set
+    # parameters, counters, ....
 
     def extra_callback(self, timearray_loc):
         self.timer.timearray_new=timearray_loc
-
-
 
     def update_energy_manager(self):
         self.estore = m.EnergyManager(self.mesh.trimesh, self.eparams)
 
     def update_energy_parameters(self):
         self.eparams = self.estore.eparams
-
 
     def reset_counter(self,move=0,flip=0):
 
@@ -1586,185 +1855,67 @@ class TriLmp():
     def update_output(self):
         self.output = make_output(self.output_params.output_format, self.output_params.output_prefix,
                                   self.output_params.output_counter, callback=self.update_output_counter)
-    
 
-    # lammps
+    # add several interactions
     def pair_cmds(self):
-        def write_srp_table():
-            """
-            creates a python file implementing the repulsive part of the tether potential as surface repulsion readable by
-            the lammps pair_style python
-            uses the pair_style defined above to create a lookup table used as actual pair_style in the vertex-vertex interaction in Lammps
-            is subject to 1-2, 1-3 or 1-4 neighbourhood exclusion of special bonds
-            used to model the mesh topology
-            """
-            with open('trilmp_srp_pot.py','w') as f:
-                f.write(dedent(f"""\
-                import numpy as np
-
-                class LAMMPSPairPotential(object):
-                    def __init__(self):
-                        self.pmap=dict()
-                        self.units='lj'
-                    def map_coeff(self,name,ltype):
-                        self.pmap[ltype]=name
-                    def check_units(self,units):
-                        if (units != self.units):
-                            raise Exception("Conflicting units: %s vs. %s" % (self.units,units))
-
-
-                class SRPTrimem(LAMMPSPairPotential):
-                    def __init__(self):
-                        super(SRPTrimem,self).__init__()
-                        # set coeffs: kappa_r, cutoff, r (power)
-                        #              4*eps*sig**12,  4*eps*sig**6
-                        self.units = 'lj'
-                        self.coeff = {{'C'  : {{'C'  : ({self.eparams.repulse_params.lc1},{self.eparams.kappa_r},{self.eparams.repulse_params.r})  }} }}
-
-                    def compute_energy(self, rsq, itype, jtype):
-                        coeff = self.coeff[self.pmap[itype]][self.pmap[jtype]]
-
-                        srp1 = coeff[0]
-                        srp2 = coeff[1]
-                        srp3 = coeff[2]
-                        r = np.sqrt(rsq)
-                        rl=r-srp1
-
-                        e=0.0
-                        e+=np.exp(r/rl)
-                        e/=r**srp3
-                        e*=srp2
-
-                        return e
-
-                    def compute_force(self, rsq, itype, jtype):
-                        coeff = self.coeff[self.pmap[itype]][self.pmap[jtype]]
-                        srp1 = coeff[0]
-                        srp2 = coeff[1]
-                        srp3 = coeff[2]
-
-                        r = np.sqrt(rsq)
-                        f=0.0
-
-                        rp = r ** (srp3 + 1)
-                        rl=r-srp1
-                        f=srp1/(rl*rl)+srp3/r
-                        f/=rp
-                        f*=np.exp(r/rl)
-                        f*=srp2
-
-                        return f    
-                """))
-            self.lmp.commands_string(dedent(f"""\
-            pair_style python {self.eparams.repulse_params.lc1}
-            pair_coeff * * trilmp_srp_pot.SRPTrimem C {'C '*self.beads.n_types}
-            shell rm -f trimem_srp.table
-            pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp 1.0 1.0
-            pair_style none 
-            """))
-        write_srp_table()
-
-        
-        pairs:list[tuple[str,float,str,str]]=[]
-        overlay=False
+        # TODO: is this still needed?
+        # TODO: what is even going on here? Why 3 layer nested functions?
         def add_pair(name:str,cutoff:float,args:str,modify_coeff_cmds:str):
             pairs.append((name,cutoff,args,modify_coeff_cmds))
 
-        
-        assert self.eparams.repulse_params.lc1
-        # todo: performance : change to table bitmap style for improved performance
-        # todo: performance : change to non-table style
-        add_pair("table",self.eparams.repulse_params.lc1, "linear 2000",dedent(f"""
-        pair_modify pair table special lj/coul 0.0 0.0 0.0
-        pair_coeff 1 1 table trimem_srp.table trimem_srp
-        """))
-        
-        if self.beads.n_beads:
-
-            if self.beads.bead_interaction=='nonreciprocal':
-                overlay=True
-                # the bead_interaction_params should be set to 'nonreciprocal'
-                # the parameters are handed as tuples (activity1,mobility1,activity2,mobility2,exponent,scale,k_harmonic,cut_mult)
-                # k_harmonic determines height of bead_membrane harmonic barrier and k_harm_beads the bead-bead repulsion (if bead_self_interaction is set to True) (to do)
-                if self.beads.bead_interaction_params[5]=='auto':
-                    scale=(1+self.beads.bead_interaction_params[4])*0.5*(self.estore.eparams.bond_params.lc1 + self.beads.bead_sizes)*2**(-self.beads.bead_interaction_params[4])
-                else:
-                    scale=self.beads.bead_interaction_params[5]
-                
-                
-                activity_1=self.beads.bead_interaction_params[0]
-                mobility_1=self.beads.bead_interaction_params[1]
-                activity_2=self.beads.bead_interaction_params[2]
-                mobility_2=self.beads.bead_interaction_params[3]
-            
-                # soft-core (harmonic) repulsion
-                k_harmonic=self.beads.bead_interaction_params[6]
-                lc_harmonic_12=0.5*(self.estore.eparams.bond_params.lc1 + self.beads.bead_sizes)
-                lc_harmonic_22=self.beads.bead_sizes
-
-                add_pair("harmonic/cut","","",dedent(f"""\
-                    pair_coeff * * harmonic/cut 0 0
-                    pair_coeff 1 2 harmonic/cut {k_harmonic} {lc_harmonic_12}
-                    pair_coeff 2 2 harmonic/cut {k_harmonic} {lc_harmonic_22}
-                """))
-
-                sigma12=float(0.5*(self.estore.eparams.bond_params.lc1 + self.beads.bead_sizes))
-                cutoff_nonrec = float(sigma12*self.beads.bead_interaction_params[7])
-                exponent=self.beads.bead_interaction_params[4]
-                scale_nonrep=float(f"{scale:.4f}")
-                add_pair("nonreciprocal", "",f"{cutoff_nonrec} {scale_nonrep} {exponent} {sigma12}",dedent(f"""
-                    pair_coeff * * nonreciprocal 0 0 0 0 0
-                    pair_coeff 1 2 nonreciprocal {activity_1} {activity_2} {mobility_1} {mobility_2} {cutoff_nonrec}
-                """))
-
-            elif self.beads.bead_interaction=='lj/cut':
-                overlay=True
-                bead_ljd = 0.5 * (self.estore.eparams.bond_params.lc1 + np.max(self.beads.bead_sizes))
-                cutoff=4*bead_ljd
-                cmds:list[str]=[]
-                if self.beads.n_types==1:
-                    cmds.append(dedent(f"""                    
-                        pair_coeff * * {self.beads.bead_interaction} 0 0 0                   
-                        pair_coeff 1 2 {self.beads.bead_interaction} {self.beads.bead_interaction_params[0]} {bead_ljd} {bead_ljd*self.beads.bead_interaction_params[1]}  
-                        pair_coeff 2 2 {self.beads.bead_interaction} 0 0 0             
-                        """))
-                else:
-                    for i in range(self.beads.n_types):
-                        bead_ljd = 0.5 * (self.estore.eparams.bond_params.lc1 + self.beads.bead_sizes[i])
-                        cmds.append(f'pair_coeff 1 {i+2} {self.beads.bead_interaction} {self.beads.bead_interaction_params[i][0]} {bead_ljd} {bead_ljd*self.beads.bead_interaction_params[i][1]}')
-                        if self.beads.self_interaction:
-                            for j in range(i,self.beads.n_types):
-                                bead_ljd = 0.5 * (self.beads.bead_sizes[i] + self.beads.bead_sizes[i])
-                                cmds.append(f'pair_coeff {i+2} {j + 2} {self.beads.bead_interaction} {self.beads.self_interaction_params[0]} {bead_ljd} {bead_ljd * self.beads.self_interaction_params[1]}')
-                        else:
-                            for j in range(i,self.beads.n_types):
-                                cmds.append(f'pair_coeff {i + 2} {j + 2}  {self.beads.bead_interaction} 0 0 0')
-
-                add_pair(str(self.beads.bead_interaction),float(cutoff),"", "\n".join(cmds))
-            elif self.beads.bead_interaction=='custom':
-                raise NotImplementedError()
-                # self.lmp.commands_string(self.beads.bead_interaction_params)
-        
-        # todo: check if global cutoff is needed somewhere
-        # global_cutoff=max((cutoff for (name,args,cutoff,cmds) in pairs),default=np.nan)
-
         def pair_style_cmd():
+
             def pair_style_2_style_cmd(name:str,cutoff:float,args:str):
                 l=[name]
                 if not name.startswith('table'):
                     l.append(str(cutoff))
                 l.append(args)
                 return ' '.join(l)
+
             pair_style='hybrid/overlay' if overlay else 'hybrid'
             l=['pair_style',pair_style]
             for (name,cutoff,args,*_) in pairs:
                 l.append(pair_style_2_style_cmd(name,cutoff,args))
             return ' '.join(l)
+
+        # surface repulsion
+        # write_srp_table()
+
+        pairs:list[tuple[str,float,str,str]]=[]
+        overlay=True
+
+        # todo: performance : change to table bitmap style for improved performance
+        # todo: performance : change to non-table style
+        assert self.eparams.repulse_params.lc1
+        add_pair("table",self.eparams.repulse_params.lc1, "linear 2000",dedent(f"""
+        pair_modify pair table special lj/coul 0.0 0.0 0.0 tail no
+        pair_coeff 1 1 table trimem_srp.table trimem_srp
+        """))
+
+        if self.num_particle_types>1:
+            overlay = True
+        add_pair("lj/cut","2.5","",dedent(f"""\
+            pair_coeff * * lj/cut 0 0 0
+        """))
+
         l=[]
+
         l.append(pair_style_cmd())
         for pair in pairs:
             l.append(pair[-1])
         return '\n'.join(l)
+
+    @staticmethod
+    def parse_boundary(periodic: pyUnion[bool, list[bool]]) -> str:
+        if isinstance(periodic, bool):
+            return "p p p" if periodic else "f f f"
+        elif isinstance(periodic, list) and len(periodic) == 3:
+            return " ".join("p" if p else "f" for p in periodic)
+        else:
+            raise ValueError("periodic must be a bool or a list of 3 bools")
+################################################################################
+#                       READ AND LOAD CHECKPOINTS                              #
+################################################################################
 
 def read_checkpoint(fname):
 

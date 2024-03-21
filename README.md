@@ -111,22 +111,13 @@ Roughly, this is what some of these packages can be useful for:
 
 Please feel free to add or delete as many LAMMPS packages as you want. You can always come back and recompile LAMMPS with additional packages in the future if you need it.
 
+If you try the above compilation and it is not working, try loading the openmpi module by typing ```module load openmpi``` in the cluster. 
+
 Finally to make LAMMPS accessible for python, i.e. making and copying the shared libaries.
 
 ```bash
 make install-python
 ```
-
-
-
-
-
-
-
-
-
-
-
 
 ### Dependencies
 
