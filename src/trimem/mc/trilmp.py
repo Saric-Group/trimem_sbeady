@@ -283,7 +283,7 @@ class TriLmp():
                  area_frac = 1.0,            # target area
                  volume_frac = 1.0,          # target volume
                  curvature_frac = 1.0,       # target curvature
-                 print_bending_energy=False, # might increase simulation run
+                 print_bending_energy=True,  # might increase simulation run - think of putting it as false
 
                  # REFERENCE STATE DATA placeholders to be filled by reference state parameters (used to reinitialize estore)
                  area=1.0,          # reference area
@@ -665,7 +665,13 @@ class TriLmp():
         ########################################################################
 
         # create internal lammps instance
-        self.lmp = lammps(cmdargs=['-sf','omp'])
+        # MMB note: the '-screen', 'none' have been added to suppress
+        #           LAMMPS output (e.g., repeated bond information)
+        #           Printing to the screen still works for other Trimem
+        #           functionalities. If you are interested in printing
+        #           specific quantities to keep an eye on them, you
+        #           will have to print them explicitly.
+        self.lmp = lammps(cmdargs=['-sf','omp', '-screen', 'none'])
         self.L = PyLammps(ptr=self.lmp,verbose=False)
         total_particle_types = num_particle_types # 1+self.beads.n_types
 
@@ -702,13 +708,13 @@ class TriLmp():
             dielectric  1.0
             compute th_ke all ke
             compute th_pe all pe pair bond
-
+            
             thermo {self.algo_params.traj_steps}
             thermo_style custom c_th_pe c_th_ke
             thermo_modify norm no
 
-            info styles compute out log
-            echo log
+            #info styles compute out log
+            echo screen
 
         """)
 
@@ -1272,7 +1278,7 @@ class TriLmp():
             t_fix = time.time()
             self.hmc_step()
             self.timer.timearray_new[0] += (time.time() - t_fix)
-            self.MDstep +=1
+            self.MDsteps +=1
         else:
             t_fix = time.time()
             self.flip_step()
@@ -1443,11 +1449,12 @@ class TriLmp():
 
     # decorators for meshupdates when calling force function
     def _update_mesh(func):
-        """VARIANT FOR USE WITH self.minim():Decorates a method with an update of the mesh vertices.
+        
+        #VARIANT FOR USE WITH self.minim():Decorates a method with an update of the mesh vertices.
 
-        The method must have signature f(self, x, \*args, \*\*kwargs) with
-        x being the new vertex coordinates.
-        """
+        #The method must have signature f(self, x, \*args, \*\*kwargs) with
+        #x being the new vertex coordinates.
+
         def wrap(self, x, *args, **kwargs):
             self.mesh.x = x.reshape(self.mesh.x.shape)
             return func(self, x, *args, **kwargs)
@@ -1456,11 +1463,11 @@ class TriLmp():
         return wrap
 
     def _update_mesh_one(func):
-        """VARIANT FOR USE WITH LAMMPS: Decorates a method with an update of the mesh vertices.
+        #VARIANT FOR USE WITH LAMMPS: Decorates a method with an update of the mesh vertices.
 
-        The method must have signature f(self, lmp, ntimestep, nlocal, tag, x,f \*args, \*\*kwargs) with
-        x being the new vertex coordinates.
-        """
+        #The method must have signature f(self, lmp, ntimestep, nlocal, tag, x,f \*args, \*\*kwargs) with
+        #x being the new vertex coordinates.
+        
         def wrap(self,  lmp, ntimestep, nlocal, tag, x,f,  *args, **kwargs):
 
             self.mesh.x = x[:self.n_vertices].reshape(self.mesh.x[:self.n_vertices].shape)
@@ -1579,13 +1586,15 @@ class TriLmp():
             #    f.write(f'{i}')
         """
 
-        if self.output_params.checkpoint_every and (i % self.output_params.checkpoint_every == 0):
+        # MMB CHANGE -- Print only on specific MD steps
+        if self.output_params.checkpoint_every and (self.MDsteps % self.output_params.checkpoint_every == 0):
             self.cpt_writer()
 
-        # update reference properties?
+        # update reference properties
         self.estore.update_reference_properties()
-
-        if self.output_params.energy_increment and (i % self.output_params.energy_increment==0):
+        
+        # MMB CHANGE -- Print only on specific MD steps
+        if self.output_params.energy_increment and (self.MDsteps % self.output_params.energy_increment==0):
 
             # MMB CHANGE -- PRINT ENERGIES
             self.ke_new=self.lmp.numpy.extract_compute("th_ke",LMP_STYLE_GLOBAL,LMP_TYPE_SCALAR)
@@ -1600,10 +1609,10 @@ class TriLmp():
                 bending_energy_temp = self.estore.properties(self.mesh.trimesh).bending
 
                 with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
-                    f.write(f'{i} {self.estore.energy(self.mesh.trimesh)} {self.ke_new} {self.pe_new} {self.acceptance_rate} {mesh_volume} {mesh_area} {bending_energy_temp}\n')
+                    f.write(f'{self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.ke_new} {self.pe_new} {self.acceptance_rate} {mesh_volume} {mesh_area} {bending_energy_temp}\n')
             else:
                 with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
-                    f.write(f'{i} {self.estore.energy(self.mesh.trimesh)} {self.ke_new} {self.pe_new} {self.acceptance_rate} {mesh_volume} {mesh_area}\n')
+                    f.write(f'{self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.ke_new} {self.pe_new} {self.acceptance_rate} {mesh_volume} {mesh_area}\n')
 
 
         if self.output_params.info and (i % self.output_params.info == 0):
