@@ -250,6 +250,7 @@ class TriLmp():
 
                  # INITIALIZATION
                  initialize=True,                  # determines if mesh is used as new reference in estore
+                 debug_mode=True,                  # determines how much of the LAMMPS output will be printed
                  num_particle_types=1,             # how many particle types will there be in the system
                  mass_particle_type=[1],           # the mass of the particle per type
                  group_particle_type=['vertices'], # insert the name of each group
@@ -387,6 +388,7 @@ class TriLmp():
 
         # initialization of (some) object attributes
         self.initialize           = initialize
+        self.debug_mode           = debug_mode
         self.equilibrated         = equilibrated
         self.equilibration_rounds = equilibration_rounds
         self.acceptance_rate      = 0.0
@@ -664,14 +666,29 @@ class TriLmp():
         # " atom_modify sort 0 0.0 " in the input file                         #
         ########################################################################
 
-        # create internal lammps instance
-        # MMB note: the '-screen', 'none' have been added to suppress
-        #           LAMMPS output (e.g., repeated bond information)
-        #           Printing to the screen still works for other Trimem
-        #           functionalities. If you are interested in printing
-        #           specific quantities to keep an eye on them, you
-        #           will have to print them explicitly.
-        self.lmp = lammps(cmdargs=['-sf','omp', '-screen', 'none'])
+        ########################################################################
+        # create internal lammps instance                                      #
+        # MMB note: the '-screen', 'none' suppresses                           #
+        #           LAMMPS output (e.g., repeated bond information)            #
+        #           It can be activated by setting debug_mode = False          #
+        #           By default, debug_mode = True                              #
+        #           The printing of other Trimem information is unaffected.    #
+        #           If you are interested in keeping track of                  #
+        #           specific quantities to keep an eye on them, you            #
+        #           will have to print them explicitly.                        #
+        #           Keep also in mind that since the above option removes all  #
+        #           output, you may have trouble debugging simulations.        #     
+        #           For that reason, it may be better to remove the commands   #
+        #           while you are developping, and turn it on afterwards       #
+        #           and turn it off afterwards.                                #
+        ########################################################################
+        cmdargs=['-sf','omp']
+
+        if not self.debug_mode:
+            cmdargs.append('-screen')
+            cmdargs.append('none')
+
+        self.lmp = lammps(cmdargs=cmdargs)
         self.L = PyLammps(ptr=self.lmp,verbose=False)
         total_particle_types = num_particle_types # 1+self.beads.n_types
 
@@ -1233,7 +1250,7 @@ class TriLmp():
 
         # actual MD run of the code
         else:
-            self.lmp.command(f'run {self.algo_params.traj_steps} pre no post no')
+            self.lmp.command(f'run {self.algo_params.traj_steps}')
             self.m_acc += 1
             self.m_i += 1
             self.counter["move"] += 1
@@ -1586,21 +1603,22 @@ class TriLmp():
             #    f.write(f'{i}')
         """
 
-        # MMB CHANGE -- Print only on specific MD steps
-        if self.output_params.checkpoint_every and (self.MDsteps % self.output_params.checkpoint_every == 0):
+        if self.output_params.checkpoint_every and (i % self.output_params.checkpoint_every == 0):
             self.cpt_writer()
 
         # update reference properties
         self.estore.update_reference_properties()
         
+        # MMB open to clean-up
+        if self.output_params.energy_increment and (self.MDsteps ==1):
+            temp_file = open(f'{self.output_params.output_prefix}_system.dat','w')
+            temp_file.close()
+
         # MMB CHANGE -- Print only on specific MD steps
         if self.output_params.energy_increment and (self.MDsteps % self.output_params.energy_increment==0):
 
-            # MMB CHANGE -- PRINT ENERGIES
-            self.ke_new=self.lmp.numpy.extract_compute("th_ke",LMP_STYLE_GLOBAL,LMP_TYPE_SCALAR)
-            self.pe_new=self.lmp.numpy.extract_compute("th_pe", LMP_STYLE_GLOBAL, LMP_TYPE_SCALAR)
-
-            # MMB compute volume and area of the mesh
+            # MMB REMOVED POTENTIAL ENERGY AND KINETIC ENERGY COMPUTATION FROM HERE
+            # MMB compute volume and area of the mesh  
             test_mesh = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f)
             mesh_volume = test_mesh.volume
             mesh_area   = test_mesh.area
@@ -1609,10 +1627,10 @@ class TriLmp():
                 bending_energy_temp = self.estore.properties(self.mesh.trimesh).bending
 
                 with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
-                    f.write(f'{self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.ke_new} {self.pe_new} {self.acceptance_rate} {mesh_volume} {mesh_area} {bending_energy_temp}\n')
+                    f.write(f'{self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.acceptance_rate} {mesh_volume} {mesh_area} {bending_energy_temp}\n')
             else:
                 with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
-                    f.write(f'{self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.ke_new} {self.pe_new} {self.acceptance_rate} {mesh_volume} {mesh_area}\n')
+                    f.write(f'{self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.acceptance_rate} {mesh_volume} {mesh_area} 0\n')
 
 
         if self.output_params.info and (i % self.output_params.info == 0):
