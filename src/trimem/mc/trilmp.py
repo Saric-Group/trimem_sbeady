@@ -681,11 +681,14 @@ class TriLmp():
         #           For that reason, it may be better to remove the commands   #
         #           while you are developping, and turn it on afterwards       #
         #           and turn it off afterwards.                                #
+        #           '-log', 'none'  suppresses output to log file              #
         ########################################################################
         cmdargs=['-sf','omp']
 
         if not self.debug_mode:
             cmdargs.append('-screen')
+            cmdargs.append('none')
+            cmdargs.append('-log')
             cmdargs.append('none')
 
         self.lmp = lammps(cmdargs=cmdargs)
