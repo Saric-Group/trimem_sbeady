@@ -322,8 +322,8 @@ class TriLmp():
                  output_format='xyz',         # output format for trajectory -> NOT YET (STATISFYINGLY) IMPLEMENTED
                  output_flag='A',             # initial flag for output (alternating A/B)
                  output_counter=0,            # used to initialize (outputted) trajectory number in writer classes
-                 performance_increment=1000,  # print performance stats every nth step to output_prefix_performance.dat
-                 energy_increment=250,        # print total energy to energy.dat
+                 performance_increment=10,  # print performance stats every nth step to output_prefix_performance.dat
+                 energy_increment=10,        # print total energy to energy.dat
 
                  # TIMING UTILITY (used to time performance stats)
                  ptime=time.time(),
@@ -1308,7 +1308,7 @@ class TriLmp():
             print("ERROR: You have not defined a single integrator.")
             sys.exit(1)
 
-        if (self.equilibration_rounds>0) and (self.equilibration_rounds%self.MDsteps!=0):
+        if (self.equilibration_rounds>0) and (self.equilibration_rounds%self.traj_steps!=0):
             print("ERROR: Number of equilibration rounds not a multiple of traj_steps. Post equilibration commands will never be read.")
             sys.exit(1)
 
@@ -1437,7 +1437,12 @@ class TriLmp():
                 # add commands that you would like LAMMPS to know of after the equilibration
                 if postequilibration_lammps_commands:
                     for command in postequilibration_lammps_commands:
-                        self.lmp.commands_string(command)
+                        self.lmp.command(command)
+
+                if self.debug_mode:
+                    print("These are your current fixes: ")
+                    print(self.L.fixes)
+                    
 
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
@@ -1589,15 +1594,13 @@ class TriLmp():
         self.estore.update_reference_properties()
         
         # MMB open to clean-up
-        if self.output_params.energy_increment and (self.MDsteps ==1):
+        if  self.MDsteps ==1:
             temp_file = open(f'{self.output_params.output_prefix}_system.dat','w')
             temp_file.close()
 
         # MMB CHANGE -- Print only on specific MD steps
-        if self.output_params.energy_increment and (self.MDsteps % self.output_params.energy_increment==0):
+        if i % self.output_params.energy_increment==0:
 
-            # MMB REMOVED POTENTIAL ENERGY AND KINETIC ENERGY COMPUTATION FROM HERE
-            # MMB compute volume and area of the mesh  
             test_mesh = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f)
             mesh_volume = test_mesh.volume
             mesh_area   = test_mesh.area
@@ -1606,11 +1609,11 @@ class TriLmp():
                 bending_energy_temp = self.estore.properties(self.mesh.trimesh).bending
 
                 with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
-                    f.write(f'{self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.acceptance_rate} {mesh_volume} {mesh_area} {bending_energy_temp}\n')
+                    f.write(f'{i} {self.estore.energy(self.mesh.trimesh)} {self.acceptance_rate} {mesh_volume} {mesh_area} {bending_energy_temp}\n')
                     f.flush()
             else:
                 with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
-                    f.write(f'{self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.acceptance_rate} {mesh_volume} {mesh_area} 0\n')
+                    f.write(f'{i} {self.estore.energy(self.mesh.trimesh)} {self.acceptance_rate} {mesh_volume} {mesh_area} 0\n')
                     f.flush()
 
 
