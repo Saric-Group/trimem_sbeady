@@ -38,8 +38,14 @@
 # --- Pickle + Checkpoint Utility                                              #
 # --- LAMMPS scrips used for setup                                             #
 #                                                                              #
+# The code has been restructured and rewritten by Maitane Munoz Basagoiti      #
+# after its initial implementation. The TriLMP class has been reduced to its   #
+# minimum with the goal of having a more organic coupling to LAMMPS. The       #
+# main motivation of this rewriting was to improve code readability, make      #
+# debugging easier and simplify the process of adding features to the          #
+# simulations.                                                                 #
 #                                                                              #
-# TRILM FUNCTIONALITIES                                                        #
+# CURRENT TRILMP FUNCTIONALITIES                                               #
 # 1. Triangulated vesicle in solution                                          #
 #   1.1. Tube pulling experiment                                               #
 # 2. Triangulated vesicle in the presence of                                   #
@@ -49,9 +55,12 @@
 # 3. Extended simulation functionalities                                       #
 #   3.1. GCMC Simulations                                                      #
 #   3.2. Chemical reactions                                                    #
-# The code is updated by the following members of the Saric group              #
+#                                                                              #
+# The code is currently mantained by the following members of the Saric group  #
+# (Please write your name + email in the lines below if it applies)            #
 # - Maitane Munoz Basagoiti (MMB) - maitane.munoz-basagoiti@ista.ac.at         #
-# - Miguel Amaral (MA) - miguel.amaral@ista.ac.at                              #
+# - name + email                                                               #
+#                                                                              #
 # Implementation codes of chemical reactions without topology information:     #
 # - Felix Wodaczek (FW) - felix.wodaczek@ista.ac.at                            #                                     #
 #                                                                              #
@@ -132,44 +141,27 @@ class InitialState():
         self.tethering=tethering
 
 class Beads():
-    def __init__(self,n_types,bead_int,bead_int_params,bead_pos,bead_vel,bead_sizes,bead_masses,bead_types,self_interaction,self_interaction_params):
+    def __init__(self,n_beads, n_bead_types,bead_pos,bead_sizes,bead_types):
         """Storage for Bead parameters.
 
         Args:
-            n_types: number of different types of beads used
-            bead_int: interaction type ('lj/cut','nonreciprocal','tether') -> will be generalized
-            bead_int_params: (NP,n_types) tuple of parameters used for interaction where NP is the number
-                of used parameters and n_types the number of bead types,
-                e.g. ((par1_bead1,par2_bead1),(par1_bead2,par2_bead2))
-            bead_pos: (N,3) array of bead positions with N being
-                the number of beads.
-            bead_vel: (N,3) array of bead velocities with N being
-                the number of beads.
-            bead_sizes: (n_types,1) tuple containing the sizes of the beads, e.g. (size_bead1) or (size_bead1,size_bead2)
-            bead_masses: (n_types,1) tuple containing the mass of the beads, for n_type==1 just use single float
-            bead_types: (N_beads,1) tuple or array (must use 1 index) of the different types of the beads.
-                Bead types are strictly >=2, e.g. 3 beads and 2 n_types (2,3,3)
-            self_interaction: bool (default False) sets the same potential as used before for interaction of bead types
-            self_interaction_params: same as interaction params but for the interaction of beads with beads of their own type
-                -> TODO: interface to set all bead-bead interactions not yet implemented
-
+            n_beads      : number of external beads in the system
+            n_bead_types : number of different types of beads used
+            bead_pos     : (n_beads,3) array of bead positions
+            bead_sizes   : (n_bead_types,1) tuple containing the sizes of the beads, e.g. (size_bead1) or (size_bead1,size_bead2)
+            bead_types   : (n_beads,1) tuple or array (must use 1 index) of the different types of the beads.
+                Bead types are strictly >=2, e.g. 3 beads and 2 bead_types (2,3,3)
             args: ignored
 
         Keyword Args:
             kwargs: ignored
 
         """
-        self.n_beads=bead_pos.shape[0]
-        self.n_types=n_types
+        self.n_beads=n_beads
+        self.n_bead_types=n_bead_types
         self.positions=bead_pos
-        self.velocities=bead_vel
         self.types=bead_types
-        self.masses=bead_masses
-        self.bead_interaction=bead_int
-        self.bead_interaction_params=bead_int_params
-        self.bead_sizes=bead_sizes                      ## diameter
-        self.self_interaction=self_interaction
-        self.self_interaction_params=self_interaction_params
+        self.bead_sizes=bead_sizes  
 
 class OutputParams():
     """Containter for parameters related to the output option """
@@ -347,16 +339,11 @@ class TriLmp():
 
                  # BEADS/NANOPARTICLES
                  # (must be initialized in init because affects input file)
-                 n_types=0,                     # number of nanoparticle types
-                 bead_int='lj/cut',             # interaction between membrane and nanoparticles
-                 bead_int_params=(0,0),         # interaction parameters (depends on pair style)
+                 n_beads=0,                     # number of nanoparticles
+                 n_bead_types=0,                # number of nanoparticle types
                  bead_pos=np.zeros((0,0)),      # positioning of the beads
-                 bead_vel=None,                 # initial bead velocity
                  bead_sizes=0.0,                # bead sizes
-                 bead_masses=1.0,               # bead masses
                  bead_types=[],                 # bead types
-                 self_interaction=False,        # interaction between nanoparticles
-                 self_interaction_params=(0,0),  # nanoparticle interaction parameters
                  n_bond_types = 1,
 
                  # EXTENSIONS MMB: ELASTIC MEMBRANE/S-LAYER
@@ -396,6 +383,7 @@ class TriLmp():
         # self.check_neigh_every    = check_neigh_every
         self.num_particle_types   = num_particle_types
         self.MDsteps              = 0.0
+        self.traj_steps           = traj_steps
 
         # used for (TRIMEM) minimization
         self.flatten = True
@@ -572,16 +560,11 @@ class TriLmp():
         #                           BEADS/NANOPARTICLES                        #
         ########################################################################
 
-        self.beads=Beads(n_types,
-                         bead_int,
-                         bead_int_params,
+        self.beads=Beads(n_beads,
+                         n_bead_types,
                          bead_pos,
-                         bead_vel,
                          bead_sizes,
-                         bead_masses,
-                         bead_types,
-                         self_interaction,
-                         self_interaction_params)
+                         bead_types)
 
         ########################################################################
         #                             EXTENSION: TETHERS                      #
@@ -594,20 +577,6 @@ class TriLmp():
 
         n_tethers=0
         add_tether=False
-
-        #added tethers
-        if self.beads.bead_interaction=='tether':
-            add_tether=True
-            n_tethers=self.beads.n_beads
-            n_bond_types+=1
-            bond_text=f"""
-            special_bonds lj/coul 0.0 0.0 0.0
-            bond_style hybrid zero harmonic
-            bond_coeff 1 zero 0.0
-            bond_coeff 2 harmonic {self.beads.bead_interaction_params[0]} {self.beads.bead_interaction_params[1]}
-            special_bonds lj/coul 0.0 0.0 0.0
-
-            """
 
         ########################################################################
         #             EXTENSION: ELASTIC MEMBRANE/SLAYER                       #
@@ -693,7 +662,7 @@ class TriLmp():
 
         self.lmp = lammps(cmdargs=cmdargs)
         self.L = PyLammps(ptr=self.lmp,verbose=False)
-        total_particle_types = num_particle_types # 1+self.beads.n_types
+        total_particle_types = num_particle_types
 
         # define atom_style
         atom_style_text = "hybrid bond charge"
@@ -775,7 +744,7 @@ class TriLmp():
                     f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
 
                 if self.beads.n_beads:
-                    if self.beads.n_types>1:
+                    if self.beads.n_bead_types>1:
                         for i in range(self.beads.n_beads):
                             f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
                     else:
@@ -944,11 +913,6 @@ class TriLmp():
             self.lmp.commands_string(self.atom_props)
         else:
             self.lmp.command('velocity all zero linear')
-
-        # setting or reinitializing bead velocities
-        if np.any(self.beads.velocities):
-            for i in range(self.n_vertices,self.n_vertices+self.beads.n_beads):
-                self.L.atoms[i].velocity=self.beads.velocities[i-self.n_vertices,:]
 
         # setting or reinitializing mesh velocities
         if np.any(self.mesh_velocity):
@@ -1298,7 +1262,10 @@ class TriLmp():
             t_fix = time.time()
             self.hmc_step()
             self.timer.timearray_new[0] += (time.time() - t_fix)
-            self.MDsteps +=1
+
+            # after performing the MD section of the simulation, update counter
+            self.MDsteps +=self.traj_steps
+
         else:
             t_fix = time.time()
             self.flip_step()
@@ -1316,6 +1283,11 @@ class TriLmp():
         self.timer.timearray_new[1] += (time.time() - t_fix)
 
     def raise_errors_run(self, integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near):
+
+        """
+        Use function to raise errors and prevent compatibility issues
+        """
+        
         if check_outofrange and (check_outofrange_freq<0 or check_outofrange_cutoff<0):
             print("ERROR: Incorrect check_outofrange parameters")
             sys.exit(1)
@@ -1324,16 +1296,20 @@ class TriLmp():
             print("ERROR: Slayer is true, but n_beads is non zero. This simulation set-up is not possible.")
             sys.exit(1)
 
-        if self.beads.n_types>0 and fix_symbionts_near==False:
+        if self.beads.n_bead_types>0 and fix_symbionts_near==False:
             print("ERROR: Simulation contains beads that may not be correctly positioned.")
             sys.exit(1)
 
-        if fix_symbionts_near and self.beads.n_types==0:
+        if fix_symbionts_near and self.beads.n_bead_types==0:
             print("ERROR: No symbiont to place near.")
             sys.exit(1)
 
         if not integrators_defined:
             print("ERROR: You have not defined a single integrator.")
+            sys.exit(1)
+
+        if (self.equilibration_rounds>0) and (self.equilibration_rounds%self.MDsteps!=0):
+            print("ERROR: Number of equilibration rounds not a multiple of traj_steps. Post equilibration commands will never be read.")
             sys.exit(1)
 
         print("No errors to report for run. Simulation begins.")
@@ -1394,7 +1370,7 @@ class TriLmp():
             self.halt_symbiont_simulation(i, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
 
             # post equilibration update, if it applies
-            if i==self.equilibration_rounds:
+            if self.MDsteps==self.equilibration_rounds:
 
                 # place symbionts near
                 if fix_symbionts_near:
@@ -1409,7 +1385,7 @@ class TriLmp():
                         coord_bead = self.mesh.x[0]
                         rtemp      = np.sqrt(coord_bead[0]**2 + coord_bead[1]**2 + coord_bead[2]**2)
                         buffering  = 1.1
-                        sigma_tilde = 0.5*(1+self.beads.bead_sizes)
+                        sigma_tilde = 0.5*(1+self.beads.bead_sizes[0])
                         x = coord_bead[0] + buffering*sigma_tilde*coord_bead[0]/rtemp
                         y = coord_bead[1] + buffering*sigma_tilde*coord_bead[1]/rtemp
                         z = coord_bead[2] + buffering*sigma_tilde*coord_bead[2]/rtemp
@@ -1631,9 +1607,11 @@ class TriLmp():
 
                 with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
                     f.write(f'{self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.acceptance_rate} {mesh_volume} {mesh_area} {bending_energy_temp}\n')
+                    f.flush()
             else:
                 with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
                     f.write(f'{self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.acceptance_rate} {mesh_volume} {mesh_area} 0\n')
+                    f.flush()
 
 
         if self.output_params.info and (i % self.output_params.info == 0):
@@ -1652,6 +1630,7 @@ class TriLmp():
             with open(f'{self.output_params.output_prefix}_performance.dat', 'w') as file:
                 file.write(
                     '#Step Elapsed_Time Time_Per_Step %Vertex_Moves %Mesh_Flips %Residue %flip_att/num RAM_USAGE %RAM RAM_AVAILABLE_PRC RAM_TOTAL\n')
+                file.flush()
                 # tracemalloc.start()
 
         if (i % self.output_params.performance_increment == 0):
@@ -1676,6 +1655,7 @@ class TriLmp():
                                f' {self.process.memory_percent(memtype="vms"):.4f} {psutil.virtual_memory()[1] / 1000000000:.4f}'
                                f' {psutil.virtual_memory()[0] / 1000000000:.4f}\n'
                                )
+                    file.flush()
 
                 self.timer.performance_timestamps.pop(0)
                 #{self.process.cpu_percent(interval=None): .4f}
@@ -1823,16 +1803,12 @@ class TriLmp():
                 self.timer.start,
                 self.counter["move"],
                 self.counter["flip"],
-                self.beads.n_types,
-                self.beads.bead_interaction,
-                self.beads.bead_interaction_params,
+                self.beads.n_bead_types,
                 self.lmp.numpy.extract_atom('x')[self.n_vertices:,:],
                 self.lmp.numpy.extract_atom('v')[self.n_vertices:, :],
                 self.beads.bead_sizes,
                 self.beads.masses,
                 self.beads.types,
-                self.beads.self_interaction,
-                self.beads.self_interaction_params
                                )
 
     # checkpoints using pickle
