@@ -8,9 +8,6 @@
 #SBATCH --chdir=/nfs/scistore15/saricgrp/ *** directory where python simfile is located example.py
 #SBATCH --exclude=zeta[243-263]
 
-
-
-
 #
 #Number of CPU cores to use within one node
 #SBATCH --nodes 1
@@ -45,7 +42,6 @@ unset SLURM_EXPORT_ENV
 #
 #Set the number of threads to the SLURM internal variable
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-
 
 #
 #load the respective software module you intend to use

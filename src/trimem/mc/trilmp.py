@@ -1176,7 +1176,6 @@ class TriLmp():
             else:
                 # reset positions if rejected
                 if not self.beads.n_beads:
-
                     self.mesh.x[:]=self.mesh_temp[:]
                     atoms_alloc=self.L.atoms
                     if self.algo_params.thermal_velocities:
@@ -1370,7 +1369,7 @@ class TriLmp():
             self.halt_symbiont_simulation(i, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
 
             # post equilibration update, if it applies
-            if self.MDsteps==self.equilibration_rounds:
+            if self.MDsteps==self.equilibration_rounds and self.equilibrated == False:
 
                 # place symbionts near
                 if fix_symbionts_near:
@@ -1391,11 +1390,17 @@ class TriLmp():
                         z = coord_bead[2] + buffering*sigma_tilde*coord_bead[2]/rtemp
 
                         # make sure that lammps knows about this
+                        pos_alloc[self.n_vertices, 0] = x 
+                        pos_alloc[self.n_vertices, 1] = y 
+                        pos_alloc[self.n_vertices, 2] = z 
+
+                        """
                         atoms_alloc = self.L.atoms
                         atoms_alloc[self.n_vertices].position[0] = x
                         atoms_alloc[self.n_vertices].position[1] = y
                         atoms_alloc[self.n_vertices].position[2] = z
-
+                        """
+                        
                     # multiple symbionts on shell
                     elif self.beads.n_beads>1:
                         buffering =1.05
@@ -1427,10 +1432,16 @@ class TriLmp():
                             ztemp = self.mesh.x[index, 2]
                             rtemp = np.sqrt(xtemp**2 + ytemp**2 + ztemp**2)
 
+                            pos_alloc[self.n_vertices+q, 0] = xtemp + 1.05*sigma_tilde*xtemp/rtemp
+                            pos_alloc[self.n_vertices+q, 1] = ytemp + 1.05*sigma_tilde*ytemp/rtemp
+                            pos_alloc[self.n_vertices+q, 2] = ztemp + 1.05*sigma_tilde*ztemp/rtemp
+
+                            """
                             atoms_alloc[self.n_vertices+q].position[0] = xtemp + 1.05*sigma_tilde*xtemp/rtemp
                             atoms_alloc[self.n_vertices+q].position[1] = ytemp + 1.05*sigma_tilde*ytemp/rtemp
                             atoms_alloc[self.n_vertices+q].position[2] = ztemp + 1.05*sigma_tilde*ztemp/rtemp
-
+                            """
+                            
                 # change status of the membrane
                 self.equilibrated = True
 
@@ -1590,6 +1601,7 @@ class TriLmp():
         if self.output_params.checkpoint_every and (i % self.output_params.checkpoint_every == 0):
             self.cpt_writer()
 
+        # TEST HOW FAST THIS IS 
         # update reference properties
         self.estore.update_reference_properties()
         
