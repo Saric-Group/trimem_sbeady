@@ -365,6 +365,9 @@ class TriLmp():
 
                  # MAKE TIME-DEPENDENT INTERACTION TOREMOVE?
                  fix_time_dependent_interaction=False,
+                 
+                 # TEST MODE FOR OPTIMIZATIONS 
+                 test_mode = False,
 
                  ):
 
@@ -376,6 +379,7 @@ class TriLmp():
         # initialization of (some) object attributes
         self.initialize           = initialize
         self.debug_mode           = debug_mode
+        self.test_mode            = test_mode
         self.equilibrated         = equilibrated
         self.equilibration_rounds = equilibration_rounds
         self.acceptance_rate      = 0.0
@@ -685,7 +689,7 @@ class TriLmp():
             atom_modify sort 0 0.0
 
             region box block {self.algo_params.box[0]} {self.algo_params.box[1]} {self.algo_params.box[2]} {self.algo_params.box[3]} {self.algo_params.box[4]} {self.algo_params.box[5]}
-            create_box {total_particle_types} box {bond_dihedral_text} extra/bond/per/atom 14 extra/special/per/atom 14
+            create_box {total_particle_types} box {bond_dihedral_text} extra/bond/per/atom 100 extra/special/per/atom 100
 
             run_style verlet
             fix ext all external pf/callback 1 1
@@ -1032,25 +1036,43 @@ class TriLmp():
         if nf:
 
             del_com='remove'
+            
+            if self.test_mode:
 
-            for i in range(nf):
-                if i == nf-1:
-                    del_com = 'remove special'
+                for i in range(nf-1):
+                    if i == nf-1:
+                        del_com = 'remove special'
 
-                self.lmp.command(f'create_bonds single/bond 1 {flip_id[i][0] + 1} {flip_id[i][1] + 1}')
-                self.lmp.command(f'group flip_off id {flip_id[i][2] + 1} {flip_id[i][3] + 1}')
-                self.lmp.command(f'delete_bonds flip_off bond 1 {del_com}')
+                    # ---------------------------------------------------
+                    # ABOUT THESE COMMANDS (see LAMMPS documentation)
+                    # - delete_bonds
+                    #   'remove' keyword -> 'adjusts the global bond count'
+                    #   'special' keyword -> re-computes pairwise weighting list
+                    #                        weighting list treats turned-off bonds the same as turned-on
+                    #                        turned-off bonds have to be removed to change the weighting list
+
+                    # REGULAR BONDS: DO NOT trigger internal list creation now (create_bonds)
+                    self.lmp.command(f'create_bonds single/bond 1 {flip_id[i][0] + 1} {flip_id[i][1] + 1} special no') # the 'special no' here prevents the weighting list from being computed
+                    self.lmp.command(f'group flip_off id {flip_id[i][2] + 1} {flip_id[i][3] + 1}') # you MUST create a group on which delete_bonds will adct
+                    self.lmp.command(f'delete_bonds flip_off bond 1 remove') # you must (?) remove the bonds you are turning off
+                    self.lmp.command('group flip_off clear') # you must clear the group or else particles will be added to it
+                
+                # LAST BOND: TRIGGER INTERNAL LIST CREATION NOW (create_bonds)
+                self.lmp.command(f'create_bonds single/bond 1 {flip_id[nf-1][0] + 1} {flip_id[nf-1][1] + 1} special yes') # the 'special yes' here is invoked to compute the weighting list
+                self.lmp.command(f'group flip_off id {flip_id[nf-1][2] + 1} {flip_id[nf-1][3] + 1}')
+                self.lmp.command(f'delete_bonds flip_off bond 1 remove special') # maybe the special is not needed here?
                 self.lmp.command('group flip_off clear')
+            else:
 
-                    #self.lmp.command(f'delete_bonds flip_off bond 1 special')
+                for i in range(nf):
+                    if i == nf-1:
+                        del_com = 'remove special'
 
-                #ids+=f'{flip_id[i*4+2]+1} {flip_id[i*4+3]+1} '
-           # print(ids)
-           # self.lmp.command(f'group flip_off id {ids}')
-           # self.lmp.command('delete_bonds flip_off bond 1 remove special')
-           # self.lmp.command('group flip_off clear')
-           # for i in range(nf):
-           #     self.lmp.command(f'create_bonds single/bond 1 {flip_id[i * 4] + 1} {flip_id[i * 4 + 1] + 1} special yes')
+                    self.lmp.command(f'create_bonds single/bond 1 {flip_id[i][0] + 1} {flip_id[i][1] + 1}')
+                    self.lmp.command(f'group flip_off id {flip_id[i][2] + 1} {flip_id[i][3] + 1}')
+                    self.lmp.command(f'delete_bonds flip_off bond 1 {del_com}')
+                    self.lmp.command('group flip_off clear')
+
         else:
             pass
 
@@ -1076,18 +1098,28 @@ class TriLmp():
 
     # the actual flip step
     def flip_step(self):
+        
+        # time the flipping
+        start = time.time()
+
         """Make one step."""
         flip_ids=self._flips()
+        time_flips_trimem = time.time()
         self.mesh.f[:]=self.mesh.f
         #print(flip_ids)
         self.lmp_flip(flip_ids)
-
+        time_flips_lammps = time.time()
 
         self.f_acc += flip_ids[-1][0]
         self.f_num += flip_ids[-1][1]
         self.f_att += flip_ids[-1][2]
         self.f_i += 1
         self.counter["flip"] += 1
+
+        end = time.time()
+        ff = open("TriLMP_optimization.dat", "a+")
+        ff.writelines(f"MC {end-start} {time_flips_trimem - start} {time_flips_lammps - start} {len(flip_ids)}\n")
+        ff.close()
 
     ############################################################################
     #             *SELF FUNCTIONS*: HYBRID MONTE CARLO (MC + MD) SECTION       #
@@ -1216,10 +1248,20 @@ class TriLmp():
 
         # actual MD run of the code
         else:
+            
+            # MMB timing purposes
+            start = time.time()
+
             self.lmp.command(f'run {self.algo_params.traj_steps}')
             self.m_acc += 1
             self.m_i += 1
             self.counter["move"] += 1
+
+            # MMB timing purposes
+            end = time.time()
+            ff = open("TriLMP_optimization.dat", "a+")
+            ff.writelines(f"MD {end-start} {-1} {-1} {-1}\n")
+            ff.close()
 
     # print MD stage information
     def hmc_info(self):
@@ -1288,27 +1330,23 @@ class TriLmp():
         """
         
         if check_outofrange and (check_outofrange_freq<0 or check_outofrange_cutoff<0):
-            print("ERROR: Incorrect check_outofrange parameters")
+            print("TRILMP ERROR: Incorrect check_outofrange parameters")
             sys.exit(1)
 
         if self.slayer and self.n_beads!=0:
-            print("ERROR: Slayer is true, but n_beads is non zero. This simulation set-up is not possible.")
-            sys.exit(1)
-
-        if self.beads.n_bead_types>0 and fix_symbionts_near==False:
-            print("ERROR: Simulation contains beads that may not be correctly positioned.")
+            print("TRILMP ERROR: Slayer is true, but n_beads is non zero. This simulation set-up is not possible.")
             sys.exit(1)
 
         if fix_symbionts_near and self.beads.n_bead_types==0:
-            print("ERROR: No symbiont to place near.")
+            print("TRILMP ERROR: No symbiont to place near.")
             sys.exit(1)
 
         if not integrators_defined:
-            print("ERROR: You have not defined a single integrator.")
+            print("TRILMP ERROR: You have not defined a single integrator.")
             sys.exit(1)
 
         if (self.equilibration_rounds>0) and (self.equilibration_rounds%self.traj_steps!=0):
-            print("ERROR: Number of equilibration rounds not a multiple of traj_steps. Post equilibration commands will never be read.")
+            print("TRILMP ERROR: Number of equilibration rounds not a multiple of traj_steps. Post equilibration commands will never be read.")
             sys.exit(1)
 
         print("No errors to report for run. Simulation begins.")
@@ -1316,8 +1354,11 @@ class TriLmp():
     def run(
             self, N=0, integrators_defined = False, check_outofrange = False, 
             check_outofrange_freq = -1, check_outofrange_cutoff = -1, fix_symbionts_near = True, 
-            postequilibration_lammps_commands = None
+            postequilibration_lammps_commands = None, seed = 123
         ):
+
+        # set the numpy seed (MD + MC stepping)
+        np.random.seed(seed=seed)
 
         """
         MAIN TRILMP FUNCTION: Combine MD + MC runs
@@ -1335,6 +1376,21 @@ class TriLmp():
         - fix_symbionts_near : place symbionts within interaction range of membrane
         """
 
+        # -------------------------------------------------
+        # clear up the file for the timing
+        fTiming = open("TriLMP_optimization.dat", "w")
+        fTiming.writelines(f"MOVE TOTAL FLIP_TRIMEM FLIP_LAMMPS NUM_FLIPS\n")
+        fTiming.close()
+
+        # clear up this file
+        temp_file = open(f'{self.output_params.output_prefix}_system.dat','w')
+        temp_file.close()
+
+        # clear up this file
+        temp_file = open(f'{self.output_params.output_prefix}_performance.dat','w')
+        temp_file.close()
+        # -------------------------------------------------
+        
         # check whether there is any initialization error
         self.raise_errors_run(integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near)
 
@@ -1822,7 +1878,6 @@ class TriLmp():
                 self.lmp.numpy.extract_atom('x')[self.n_vertices:,:],
                 self.lmp.numpy.extract_atom('v')[self.n_vertices:, :],
                 self.beads.bead_sizes,
-                self.beads.masses,
                 self.beads.types,
                                )
 
