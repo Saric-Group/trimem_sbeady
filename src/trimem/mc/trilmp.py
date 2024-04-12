@@ -62,7 +62,7 @@
 # - name + email                                                               #
 #                                                                              #
 # Implementation codes of chemical reactions without topology information:     #
-# - Felix Wodaczek (FW) - felix.wodaczek@ista.ac.at                            #                                     #
+# - Felix Wodaczek (FW) - felix.wodaczek@ista.ac.at                            #                                
 #                                                                              #
 # ADDITIONAL NOTES                                                             #
 # To perform HMC simulation that accepts all configurations:                   #
@@ -367,7 +367,7 @@ class TriLmp():
                  fix_time_dependent_interaction=False,
                  
                  # TEST MODE FOR OPTIMIZATIONS 
-                 test_mode = False,
+                 test_mode = True,
 
                  ):
 
@@ -1099,16 +1099,22 @@ class TriLmp():
     # the actual flip step
     def flip_step(self):
         
-        # time the flipping
-        start = time.time()
+        if self.debug_mode:
+            # time the flipping
+            start = time.time()
 
         """Make one step."""
         flip_ids=self._flips()
-        time_flips_trimem = time.time()
+
+        if self.debug_mode:
+            time_flips_trimem = time.time()
+
         self.mesh.f[:]=self.mesh.f
         #print(flip_ids)
         self.lmp_flip(flip_ids)
-        time_flips_lammps = time.time()
+
+        if self.debug_mode:
+            time_flips_lammps = time.time()
 
         self.f_acc += flip_ids[-1][0]
         self.f_num += flip_ids[-1][1]
@@ -1116,10 +1122,11 @@ class TriLmp():
         self.f_i += 1
         self.counter["flip"] += 1
 
-        end = time.time()
-        ff = open("TriLMP_optimization.dat", "a+")
-        ff.writelines(f"MC {end-start} {time_flips_trimem - start} {time_flips_lammps - start} {len(flip_ids)}\n")
-        ff.close()
+        if self.debug_mode:
+            end = time.time()
+            ff = open("TriLMP_optimization.dat", "a+")
+            ff.writelines(f"MC {end-start} {time_flips_trimem - start} {time_flips_lammps - start} {len(flip_ids)}\n")
+            ff.close()
 
     ############################################################################
     #             *SELF FUNCTIONS*: HYBRID MONTE CARLO (MC + MD) SECTION       #
@@ -1249,19 +1256,21 @@ class TriLmp():
         # actual MD run of the code
         else:
             
-            # MMB timing purposes
-            start = time.time()
+            if self.debug_mode:
+                # MMB timing purposes
+                start = time.time()
 
             self.lmp.command(f'run {self.algo_params.traj_steps}')
             self.m_acc += 1
             self.m_i += 1
             self.counter["move"] += 1
 
-            # MMB timing purposes
-            end = time.time()
-            ff = open("TriLMP_optimization.dat", "a+")
-            ff.writelines(f"MD {end-start} {-1} {-1} {-1}\n")
-            ff.close()
+            if self.debug_mode:
+                # MMB timing purposes
+                end = time.time()
+                ff = open("TriLMP_optimization.dat", "a+")
+                ff.writelines(f"MD {end-start} {-1} {-1} {-1}\n")
+                ff.close()
 
     # print MD stage information
     def hmc_info(self):
@@ -1378,9 +1387,10 @@ class TriLmp():
 
         # -------------------------------------------------
         # clear up the file for the timing
-        fTiming = open("TriLMP_optimization.dat", "w")
-        fTiming.writelines(f"MOVE TOTAL FLIP_TRIMEM FLIP_LAMMPS NUM_FLIPS\n")
-        fTiming.close()
+        if self.debug_mode:
+            fTiming = open("TriLMP_optimization.dat", "w")
+            fTiming.writelines(f"MOVE TOTAL FLIP_TRIMEM FLIP_LAMMPS NUM_FLIPS\n")
+            fTiming.close()
 
         # clear up this file
         temp_file = open(f'{self.output_params.output_prefix}_system.dat','w')
