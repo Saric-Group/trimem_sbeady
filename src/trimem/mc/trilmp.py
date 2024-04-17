@@ -363,6 +363,10 @@ class TriLmp():
                  fix_rigid_symbiont_interaction=None,   # interactions of the rigid symbiont
                  fix_rigid_symbiont_params=None,        # parameters for the membrane-rigid symbiont interaction
 
+                 # EXTENSIONS MMB: MIXED/HETEROGENEOUS MEMBRANES
+                 heterogeneous_membrane=False,
+                 heterogeneous_membrane_id = None,
+
                  # MAKE TIME-DEPENDENT INTERACTION TOREMOVE?
                  fix_time_dependent_interaction=False,
                  
@@ -742,7 +746,7 @@ class TriLmp():
             f.write('\n')
 
             # [COORDINATES] STANDARD SIMULATION SET-UP: only membrane and potentially nanoparticles
-            if (not self.slayer) and (not self.fix_rigid_symbiont):
+            if (not self.slayer) and (not self.fix_rigid_symbiont) and (not heterogeneous_membrane):
                 f.write(f'Atoms # hybrid\n\n')
                 for i in range(self.n_vertices):
                     f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
@@ -775,6 +779,24 @@ class TriLmp():
                 # symbiont/nanoparticles particles are type 2
                 for i in range(self.fix_rigid_symbiont_nparticles):
                     f.write(f'{self.n_vertices + i + 1} 2  {self.fix_rigid_symbiont_coordinates[i, 0]} {self.fix_rigid_symbiont_coordinates[i, 1]} {self.fix_rigid_symbiont_coordinates[i, 2]} 1 1.0 \n')
+
+            # [COORDINATES] EXTENSION: SIMULATION WITH HETEROGENEOUS (2 TYPE) MEMBRANE
+            elif heterogeneous_membrane:
+                f.write(f'Atoms # hybrid\n\n')
+                for i in range(self.n_vertices):
+                    if i in heterogeneous_membrane_id:
+                        f.write(f'{i + 1} 2 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+                    else:
+                        f.write(f'{i + 1} 1 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+
+                if self.beads.n_beads:
+                    if self.beads.n_bead_types>1:
+                        for i in range(self.beads.n_beads):
+                            f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
+                    else:
+                        for i in range(self.beads.n_beads):
+                            f.write(f'{self.n_vertices+1+i} 3 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
+
 
             # [BONDS]
             if self.slayer == False:
@@ -878,22 +900,48 @@ class TriLmp():
 
                     return f
             """))
-        # write down the table for surface repulsion
-        self.lmp.commands_string(dedent(f"""\
-        pair_style python {self.eparams.repulse_params.lc1}
-        pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
-        shell rm -f trimem_srp.table
-        pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp 1.0 1.0
-        pair_style none
-        """))
 
-        # get the 'table' interaction to work
-        self.lmp.commands_string(dedent(f"""\
-        pair_style hybrid/overlay table linear 2000 lj/cut 2.5
-        pair_modify pair table special lj/coul 0.0 0.0 0.0 tail no
-        pair_coeff 1 1 table trimem_srp.table trimem_srp
-        pair_coeff * * lj/cut 0 0 0
-        """))
+        # [INTERACTION POTENTIAL] - SINGLE PARTICLE IN MEMBRANE
+        if not heterogeneous_membrane:
+            # write down the table for surface repulsion
+            self.lmp.commands_string(dedent(f"""\
+            pair_style python {self.eparams.repulse_params.lc1}
+            pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
+            shell rm -f trimem_srp.table
+            pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp 1.0 1.0
+            pair_style none
+            """))
+
+            # get the 'table' interaction to work
+            self.lmp.commands_string(dedent(f"""\
+            pair_style hybrid/overlay table linear 2000 lj/cut 2.5
+            pair_modify pair table special lj/coul 0.0 0.0 0.0 tail no
+            pair_coeff 1 1 table trimem_srp.table trimem_srp
+            pair_coeff * * lj/cut 0 0 0
+            """))
+        
+        # [EXTENSION] [INTERACTION POTENTIAL] - TWO PARTICLES IN MEMBRANE
+        if heterogeneous_membrane:
+            # write down the table for surface repulsion
+            self.lmp.commands_string(dedent(f"""\
+            pair_style python {self.eparams.repulse_params.lc1}
+            pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
+            shell rm -f trimem_srp.table
+            pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp11 1.0 1.0
+            pair_write  2 2 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp22 1.0 1.0
+            pair_write  1 2 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp12 1.0 1.0
+            pair_style none
+            """))
+
+            # get the 'table' interaction to work
+            self.lmp.commands_string(dedent(f"""\
+            pair_style hybrid/overlay table linear 2000 lj/cut 2.5
+            pair_modify pair table special lj/coul 0.0 0.0 0.0 tail no
+            pair_coeff 1 1 table trimem_srp.table trimem_srp11
+            pair_coeff 2 2 table trimem_srp.table trimem_srp22
+            pair_coeff 1 2 table trimem_srp.table trimem_srp12
+            pair_coeff * * lj/cut 0 0 0
+            """))
 
         # LAMMPS ...............................................................
         # GROUPS
@@ -1418,6 +1466,9 @@ class TriLmp():
         i = -1
         self.MDsteps = 0
 
+        # initial conditions -- record
+        self.callback(np.copy(self.mesh.x),self.counter)
+
         # run simulation for dictated number
         # of MD steps
         while self.MDsteps<N:
@@ -1677,7 +1728,7 @@ class TriLmp():
             temp_file.close()
 
         # MMB CHANGE -- Print only on specific MD steps
-        if i % self.output_params.energy_increment==0:
+        if i % self.output_params.energy_increment==0 or i ==0:
 
             test_mesh = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f)
             mesh_volume = test_mesh.volume
