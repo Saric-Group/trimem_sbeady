@@ -15,3 +15,4 @@ src/trimem/_version.py
 __pycache__
 *.swp
 venv
+src/trimem/mc/ignore.py

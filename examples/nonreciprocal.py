@@ -70,9 +70,6 @@ trilmp.make_checkpoint(force_name='test.cpt')
 # load a checkpoint with a specific name -> otherwise load last checkpoint associated with output_prefix (see function definition in trilmp.py)
 trilmp=load_checkpoint('test.cpt',alt='explicit')
 
-
-
-
 # in order to change parameters associated with the helfrich hamiltonian, you have to access their storage in the estore object
 trilmp.estore.eparams.kappa_c=0.0  # e.g. setting the harmonic potential for the mean curvature to 0 -> only local bending penalty for deformations
 # to change stuff appearing on the LAMMPS side of things you need to create either a new trilmp object or, change LAMMPs specific parameters e.g. beads bodns etc,

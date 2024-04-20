@@ -45,6 +45,10 @@
 # debugging easier and simplify the process of adding features to the          #
 # simulations.                                                                 #
 #                                                                              #
+# The code is stored in a GitHub repository. It is therefore subjected to      #
+# version control. Should you be interested in checking older versions,        #
+# please refer to that.                                                        #
+#                                                                              #             
 # CURRENT TRILMP FUNCTIONALITIES                                               #
 # 1. Triangulated vesicle in solution                                          #
 #   1.1. Tube pulling experiment                                               #
@@ -69,29 +73,34 @@
 #   - thermal_velocities=False, pure_MD=True                                   #
 # To perform HMC simulation as in Trimem:                                      #
 #   - thermal_velocities=True, pure_MD=False)                                  #
+#                                                                              #
+# NOTE - ABOUT ADDING NEW ATTRIBUTES TO THE CONSTRUCTOR OF TRILMP              #
+# - If you want to extend the functionalities of the TriLMP class by adding    #
+#   new attributes to the constructor, please make sure you also include them  #
+#   in the __reduce__ method so that the pickling of the object can be done    #
+#   can be done correctly. The order in which arguments are passed to the      #
+#   __reduce__ method seems to matter.                                         #
 ################################################################################
 
 ################################################################################
 #                             IMPORTS                                          #
 ################################################################################
 
-import re,textwrap, warnings, psutil, os, sys, time, pickle, pathlib, json
-from typing import Union as pyUnion # to avoid confusion with ctypes.Union
-from datetime import datetime, timedelta
-from copy import copy
-
-from collections import Counter
 import numpy as np
-from scipy.optimize import minimize
 import trimem.mc.trilmp_h5
-from ctypes import *
-from lammps import lammps, PyLammps, LAMMPS_INT, LMP_STYLE_GLOBAL, LMP_VAR_EQUAL, LMP_VAR_ATOM, LMP_TYPE_SCALAR, LMP_TYPE_VECTOR, LMP_TYPE_ARRAY, LMP_SIZE_VECTOR, LMP_SIZE_ROWS, LMP_SIZE_COLS
+import trimesh, re, textwrap, warnings, psutil, os, sys, time, pickle, pathlib, json
 
-import trimesh
+from copy import copy
+from ctypes import *
 from .. import core as m
 from trimem.core import TriMesh
 from trimem.mc.mesh import Mesh
+from collections import Counter
+from scipy.optimize import minimize
 from trimem.mc.output import make_output
+from typing import Union as pyUnion # to avoid confusion with ctypes.Union
+from datetime import datetime, timedelta
+from lammps import lammps, PyLammps, LAMMPS_INT, LMP_STYLE_GLOBAL, LMP_VAR_EQUAL, LMP_VAR_ATOM, LMP_TYPE_SCALAR, LMP_TYPE_VECTOR, LMP_TYPE_ARRAY, LMP_SIZE_VECTOR, LMP_SIZE_ROWS, LMP_SIZE_COLS
 
 _sp = u'\U0001f604'
 _nl = '\n'+_sp
@@ -142,8 +151,7 @@ class InitialState():
 
 class Beads():
     def __init__(self,n_beads, n_bead_types,bead_pos, bead_v, bead_sizes,bead_types):
-        """Storage for Bead parameters.
-
+        """Storage for external bead parameters
         Args:
             n_beads      : number of external beads in the system
             n_bead_types : number of different types of beads used
@@ -281,29 +289,26 @@ class TriLmp():
                  print_bending_energy=True,  # might increase simulation run - think of putting it as false
 
                  # PROGRAM PARAMETERS
-                 num_steps=10,                  # number of overall simulation steps (for trilmp.run() but overitten by trilmp.run(N))
-                 reinitialize_every=10000,      # NOT USED - TODO
-                 init_step='{}',                # NOT USED - TODO
-                 step_size=7e-5,                # MD time step
-                 traj_steps=100,                # MD trajectory length
-                 momentum_variance=1.0,         # mass of membrane vertices
-                 flip_ratio=0.1,                # fraction of flips intended to flip
-                 flip_type='parallel',          # 'serial' or 'parallel'
-                 initial_temperature=1.0,       # temperature of system
-                 cooling_factor=1.0e-4,         # cooling factor for simulated anneadling -> NOT IMPLEMENTED
-                 start_cooling=0,               # sim step at which cooling starts -> NOT IMPLEMENTED
-                 maxiter=10,                    # parameter used for minimize function (maximum gradient steps)
-                 refresh=1,                     # refresh rate of neighbour list -> NOT USED TODO
+                 num_steps=10,                        # number of overall simulation steps (for trilmp.run() but overitten by trilmp.run(N))
+                 reinitialize_every=10000,            # NOT USED - TODO
+                 init_step='{}',                      # NOT USED - TODO
+                 step_size=7e-5,                      # MD time step
+                 traj_steps=100,                      # MD trajectory length
+                 momentum_variance=1.0,               # mass of membrane vertices
+                 flip_ratio=0.1,                      # fraction of flips intended to flip
+                 flip_type='parallel',                # 'serial' or 'parallel'
+                 initial_temperature=1.0,             # temperature of system
+                 cooling_factor=1.0e-4,               # cooling factor for simulated anneadling -> NOT IMPLEMENTED
+                 start_cooling=0,                     # sim step at which cooling starts -> NOT IMPLEMENTED
+                 maxiter=10,                          # parameter used for minimize function (maximum gradient steps)
+                 refresh=1,                           # refresh rate of neighbour list -> NOT USED TODO
                  thermal_velocities=False,            # thermal reset of velocities at the begin of each MD step
                  pure_MD=True,                        # if true, accept every MD trajectory
                  switch_mode='random',                # 'random' or 'alternating': sequence of MD, MC stages
                  box=(-100,100,-100,100,-100,100),    # simulation box
-
-                 # MD SIMULATION PARAMETERS
                  periodic=False,                      # periodic boundary conditions
                  equilibrated=False,                  # equilibration state of membrane
                  equilibration_rounds=-1,             # number of equilibration rounds
-                 # check_neigh_every=1,                 # neighbour list checking (when applicable - not for gcmc)
 
                  # OUTPUT FILE PARAMETERS
                  info=10,                     # output hmc and flip info to shell every nth step
@@ -316,8 +321,8 @@ class TriLmp():
                  output_format='xyz',         # output format for trajectory -> NOT YET (STATISFYINGLY) IMPLEMENTED
                  output_flag='A',             # initial flag for output (alternating A/B)
                  output_counter=0,            # used to initialize (outputted) trajectory number in writer classes
-                 performance_increment=10,  # print performance stats every nth step to output_prefix_performance.dat
-                 energy_increment=10,        # print total energy to energy.dat
+                 performance_increment=10,    # print performance stats every nth step to output_prefix_performance.dat
+                 energy_increment=10,         # print total energy to energy.dat
 
                  # REFERENCE STATE DATA placeholders to be filled by reference state parameters (used to reinitialize estore)
                  area=1.0,          # reference area
@@ -367,11 +372,9 @@ class TriLmp():
                  fix_rigid_symbiont_params=None,        # parameters for the membrane-rigid symbiont interaction
 
                  # EXTENSIONS MMB: MIXED/HETEROGENEOUS MEMBRANES
+                 # (must be initialized in init because affects input file)
                  heterogeneous_membrane=False,
                  heterogeneous_membrane_id = None,
-
-                 # MAKE TIME-DEPENDENT INTERACTION TOREMOVE?
-                 fix_time_dependent_interaction=False,
                  
                  # TEST MODE FOR OPTIMIZATIONS 
                  test_mode = True,
@@ -398,7 +401,7 @@ class TriLmp():
         self.MDsteps              = 0.0
         self.traj_steps           = traj_steps
         self.n_bond_types         = n_bond_types
-        
+
         # used for (TRIMEM) minimization
         self.flatten = True
         if self.flatten:
@@ -411,9 +414,6 @@ class TriLmp():
             "Edge": m.BondType.Edge,
             "Area": m.BondType.Area
         }
-
-        # used in interaction function
-        self.fix_time_dependent_interaction = fix_time_dependent_interaction
 
         ########################################################################
         #                         MESH INITIALIZATION                          #
@@ -981,8 +981,9 @@ class TriLmp():
 
         # setting or reinitializing mesh velocities
         if np.any(self.mesh_velocity):
+            velocities = self.lmp.numpy.extract_atom("v")
             for i in range(self.n_vertices):
-                self.L.atoms[i].velocity=self.mesh_velocity[i,:]
+                velocities[i, :]=self.mesh_velocity[i,:]
 
         # LAMMPS ...............................................................
         # INTERACTIONS AND TRIMEM CALLBACK (NOT TOUCHING!)
@@ -1432,7 +1433,7 @@ class TriLmp():
     def run(
             self, N=0, integrators_defined = False, check_outofrange = False, 
             check_outofrange_freq = -1, check_outofrange_cutoff = -1, fix_symbionts_near = True, 
-            postequilibration_lammps_commands = None, seed = 123
+            postequilibration_lammps_commands = None, seed = 123, current_step = 0
         ):
 
         # set the numpy seed (MD + MC stepping)
@@ -1486,6 +1487,9 @@ class TriLmp():
         # counters for MD steps
         i = -1
         self.MDsteps = 0
+        if current_step:
+            self.MDsteps = current_step
+            N += current_step
 
         # initial conditions -- record
         self.callback(np.copy(self.mesh.x),self.counter)
@@ -1592,7 +1596,6 @@ class TriLmp():
                     print("These are your current fixes: ")
                     print(self.L.fixes)
                     
-
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
     ############################################################################
@@ -1737,7 +1740,12 @@ class TriLmp():
         """
 
         if self.output_params.checkpoint_every and (i % self.output_params.checkpoint_every == 0):
+            # make checkpoints alternating between two points
             self.cpt_writer()
+            
+        if (self.MDsteps % self.output_params.info == 0):
+            with open(f"checkpoints/ckpt_MDs_{self.MDsteps}_.pickle", 'wb') as f:
+                pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         # TEST HOW FAST THIS IS 
         # update reference properties
@@ -1969,7 +1977,7 @@ class TriLmp():
                 self.beads.bead_sizes,
                 self.beads.types,
                 self.n_bond_types,
-                               )
+                )
 
     # checkpoints using pickle
     def make_checkpoint_handle(self):
@@ -1983,8 +1991,8 @@ class TriLmp():
             cptfname = cptfname.name + self.output_params.output_flag + '.cpt'
 
             with open(cptfname, 'wb') as f:
-                #pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
-                json.dump(self, f)
+                pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                #json.dump(self, f)
             if self.output_params.output_flag == 'A':
                 self.output_params.output_flag = 'B'
             else:
@@ -1992,8 +2000,8 @@ class TriLmp():
         else:
             cptfname = pathlib.Path(force_name)
             with open(cptfname, 'wb') as f:
-                #pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
-                json.dump(self, f)
+                pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                #json.dump(self, f)
         print(f'made cp:{cptfname}')
 
     # SOME UTILITY FUNCTIONS
