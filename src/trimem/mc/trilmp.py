@@ -75,7 +75,7 @@
 #                             IMPORTS                                          #
 ################################################################################
 
-import re,textwrap, warnings, psutil, os, sys, time, pickle, pathlib
+import re,textwrap, warnings, psutil, os, sys, time, pickle, pathlib, json
 from typing import Union as pyUnion # to avoid confusion with ctypes.Union
 from datetime import datetime, timedelta
 from copy import copy
@@ -141,13 +141,14 @@ class InitialState():
         self.tethering=tethering
 
 class Beads():
-    def __init__(self,n_beads, n_bead_types,bead_pos,bead_sizes,bead_types):
+    def __init__(self,n_beads, n_bead_types,bead_pos, bead_v, bead_sizes,bead_types):
         """Storage for Bead parameters.
 
         Args:
             n_beads      : number of external beads in the system
             n_bead_types : number of different types of beads used
             bead_pos     : (n_beads,3) array of bead positions
+            bead_v       : (n_beads, 3) array of bead velocities
             bead_sizes   : (n_bead_types,1) tuple containing the sizes of the beads, e.g. (size_bead1) or (size_bead1,size_bead2)
             bead_types   : (n_beads,1) tuple or array (must use 1 index) of the different types of the beads.
                 Bead types are strictly >=2, e.g. 3 beads and 2 bead_types (2,3,3)
@@ -160,6 +161,7 @@ class Beads():
         self.n_beads=n_beads
         self.n_bead_types=n_bead_types
         self.positions=bead_pos
+        self.velocities = bead_v
         self.types=bead_types
         self.bead_sizes=bead_sizes  
 
@@ -278,14 +280,6 @@ class TriLmp():
                  curvature_frac = 1.0,       # target curvature
                  print_bending_energy=True,  # might increase simulation run - think of putting it as false
 
-                 # REFERENCE STATE DATA placeholders to be filled by reference state parameters (used to reinitialize estore)
-                 area=1.0,          # reference area
-                 volume=1.0,        # reference volume
-                 curvature=1.0,     # reference curvature
-                 bending=1.0,       # reference bending
-                 tethering=1.0,     # reference tethering
-                 #repulsion=1.0,    # would be used if surface repulsion was handeld by TRIMEM
-
                  # PROGRAM PARAMETERS
                  num_steps=10,                  # number of overall simulation steps (for trilmp.run() but overitten by trilmp.run(N))
                  reinitialize_every=10000,      # NOT USED - TODO
@@ -300,13 +294,13 @@ class TriLmp():
                  start_cooling=0,               # sim step at which cooling starts -> NOT IMPLEMENTED
                  maxiter=10,                    # parameter used for minimize function (maximum gradient steps)
                  refresh=1,                     # refresh rate of neighbour list -> NOT USED TODO
-
-                 # MD SIMULATION PARAMETERS
-                 box=(-100,100,-100,100,-100,100),    # simulation box
-                 periodic=False,                      # periodic boundary conditions
                  thermal_velocities=False,            # thermal reset of velocities at the begin of each MD step
                  pure_MD=True,                        # if true, accept every MD trajectory
                  switch_mode='random',                # 'random' or 'alternating': sequence of MD, MC stages
+                 box=(-100,100,-100,100,-100,100),    # simulation box
+
+                 # MD SIMULATION PARAMETERS
+                 periodic=False,                      # periodic boundary conditions
                  equilibrated=False,                  # equilibration state of membrane
                  equilibration_rounds=-1,             # number of equilibration rounds
                  # check_neigh_every=1,                 # neighbour list checking (when applicable - not for gcmc)
@@ -325,6 +319,14 @@ class TriLmp():
                  performance_increment=10,  # print performance stats every nth step to output_prefix_performance.dat
                  energy_increment=10,        # print total energy to energy.dat
 
+                 # REFERENCE STATE DATA placeholders to be filled by reference state parameters (used to reinitialize estore)
+                 area=1.0,          # reference area
+                 volume=1.0,        # reference volume
+                 curvature=1.0,     # reference curvature
+                 bending=1.0,       # reference bending
+                 tethering=1.0,     # reference tethering
+                 #repulsion=1.0,    # would be used if surface repulsion was handeld by TRIMEM
+
                  # TIMING UTILITY (used to time performance stats)
                  ptime=time.time(),
                  ptimestamp=[],
@@ -342,6 +344,7 @@ class TriLmp():
                  n_beads=0,                     # number of nanoparticles
                  n_bead_types=0,                # number of nanoparticle types
                  bead_pos=np.zeros((0,0)),      # positioning of the beads
+                 bead_v  = np.zeros((0,0)),
                  bead_sizes=0.0,                # bead sizes
                  bead_types=[],                 # bead types
                  n_bond_types = 1,
@@ -383,16 +386,19 @@ class TriLmp():
         # initialization of (some) object attributes
         self.initialize           = initialize
         self.debug_mode           = debug_mode
+        self.num_particle_types   = num_particle_types
+        self.mass_particle_type   = mass_particle_type
+        self.group_particle_type  = group_particle_type
         self.test_mode            = test_mode
         self.equilibrated         = equilibrated
         self.equilibration_rounds = equilibration_rounds
         self.acceptance_rate      = 0.0
         self.print_bending_energy = print_bending_energy
-        # self.check_neigh_every    = check_neigh_every
-        self.num_particle_types   = num_particle_types
+        self.periodic             = periodic
         self.MDsteps              = 0.0
         self.traj_steps           = traj_steps
-
+        self.n_bond_types         = n_bond_types
+        
         # used for (TRIMEM) minimization
         self.flatten = True
         if self.flatten:
@@ -401,7 +407,7 @@ class TriLmp():
             self._ravel = lambda x: x
 
         # different bond types used for tether potential in TRIMEM
-        self._bond_enums = {
+        self.bond_enums = {
             "Edge": m.BondType.Edge,
             "Area": m.BondType.Area
         }
@@ -415,12 +421,18 @@ class TriLmp():
 
         # mesh must be 'Mesh object'
         # gets converted to Mesh.trimesh (TriMesh) internally
-        self.mesh = Mesh(points=mesh_points, cells=mesh_faces)
+        self.mesh_points = mesh_points
+        self.mesh_faces = mesh_faces
+
+        print("This is your mesh points ", self.mesh_points)
+        print("This is your mesh faces ", self.mesh_faces)
+
+        self.mesh = Mesh(points=self.mesh_points, cells=self.mesh_faces)
 
         if pure_MD:
             self.mesh_temp=0
         else:
-            self.mesh_temp = Mesh(points=mesh_points, cells=mesh_faces)
+            self.mesh_temp = Mesh(points=self.mesh_points, cells=self.mesh_faces)
 
         self.mesh_velocity=mesh_velocity
         self.n_vertices=self.mesh.x.shape[0]
@@ -431,7 +443,7 @@ class TriLmp():
 
         self.bparams = m.BondParams()
         if issubclass(type(bond_type), str):
-            self.bparams.type = self._bond_enums[bond_type]
+            self.bparams.type = self.bond_enums[bond_type]
         else:
             self.bparams.type=bond_type
         self.bparams.r = bond_r
@@ -571,6 +583,7 @@ class TriLmp():
         self.beads=Beads(n_beads,
                          n_bead_types,
                          bead_pos,
+                         bead_v,
                          bead_sizes,
                          bead_types)
 
@@ -742,7 +755,7 @@ class TriLmp():
             # particle masses
             f.write('Masses\n\n')
             for part_types in range(num_particle_types):
-                f.write(f'{part_types+1} {mass_particle_type[part_types]}\n')
+                f.write(f'{part_types+1} {self.mass_particle_type[part_types]}\n')
             f.write('\n')
 
             # [COORDINATES] STANDARD SIMULATION SET-UP: only membrane and potentially nanoparticles
@@ -1408,6 +1421,14 @@ class TriLmp():
 
         print("No errors to report for run. Simulation begins.")
 
+    def __getstate__(self):
+        # This method is called when pickling, customize the state saved
+        return (self.mesh_points, self.mesh_faces)
+
+    def __setstate__(self, state):
+        # This method is called when unpickling, customize how state is restored
+        self.mesh_points, self.mesh_faces = state
+
     def run(
             self, N=0, integrators_defined = False, check_outofrange = False, 
             check_outofrange_freq = -1, check_outofrange_cutoff = -1, fix_symbionts_near = True, 
@@ -1864,6 +1885,10 @@ class TriLmp():
 
     def __reduce__(self):
         return self.__class__,(self.initialize,
+                self.debug_mode,
+                self.num_particle_types,
+                self.mass_particle_type,
+                self.group_particle_type,
                 self.mesh.x,
                 self.mesh.f,
                 self.lmp.numpy.extract_atom('v')[:self.n_vertices,:],
@@ -1888,6 +1913,7 @@ class TriLmp():
                 self.estore.eparams.area_frac,
                 self.estore.eparams.volume_frac,
                 self.estore.eparams.curvature_frac,
+                self.print_bending_energy,
                 self.algo_params.num_steps,
                 self.algo_params.reinitialize_every,
                 self.algo_params.init_step,
@@ -1901,12 +1927,13 @@ class TriLmp():
                 self.algo_params.start_cooling,
                 self.algo_params.maxiter,
                 self.algo_params.refresh,
-
                 self.algo_params.thermal_velocities,
                 self.algo_params.pure_MD,
                 self.algo_params.switch_mode,
                 self.algo_params.box,
-
+                self.periodic,
+                self.equilibrated,
+                self.equilibration_rounds,
                 self.output_params.info,
                 self.output_params.thin,
                 self.output_params.out_every,
@@ -1920,13 +1947,13 @@ class TriLmp():
                 self.output_params.performance_increment,
                 self.output_params.energy_increment,
 
-
                 self.estore.initial_props.area,
                 self.estore.initial_props.volume,
                 self.estore.initial_props.curvature,
                 self.estore.initial_props.bending,
                 self.estore.initial_props.tethering,
                 #self.estore.initial_props.repulsion,
+
                 self.timer.performance_start,
                 self.timer.performance_timestamps,
                 self.timer.timestamps,
@@ -1935,11 +1962,13 @@ class TriLmp():
                 self.timer.start,
                 self.counter["move"],
                 self.counter["flip"],
+                self.beads.n_beads,
                 self.beads.n_bead_types,
                 self.lmp.numpy.extract_atom('x')[self.n_vertices:,:],
                 self.lmp.numpy.extract_atom('v')[self.n_vertices:, :],
                 self.beads.bead_sizes,
                 self.beads.types,
+                self.n_bond_types,
                                )
 
     # checkpoints using pickle
@@ -1954,7 +1983,8 @@ class TriLmp():
             cptfname = cptfname.name + self.output_params.output_flag + '.cpt'
 
             with open(cptfname, 'wb') as f:
-                pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                #pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                json.dump(self, f)
             if self.output_params.output_flag == 'A':
                 self.output_params.output_flag = 'B'
             else:
@@ -1962,8 +1992,8 @@ class TriLmp():
         else:
             cptfname = pathlib.Path(force_name)
             with open(cptfname, 'wb') as f:
-                pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
-
+                #pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                json.dump(self, f)
         print(f'made cp:{cptfname}')
 
     # SOME UTILITY FUNCTIONS
