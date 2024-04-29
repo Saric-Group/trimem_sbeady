@@ -1510,8 +1510,20 @@ class TriLmp():
             # check if simulation must stop
             self.halt_symbiont_simulation(i, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
 
+
             # post equilibration update, if it applies
             if self.MDsteps==self.equilibration_rounds and self.equilibrated == False:
+
+                if self.debug_mode:
+                    print("These are your current fixes pre equilibration: ")
+                    print(self.L.fixes)
+
+                with open('LAMMPSfixes.dat', 'w') as f:
+                    f.writelines('Pre-equilibration: \n')
+                    for fix in self.L.fixes:
+                        f.writelines(f'{fix}\n')
+                    f.writelines('\n')
+                    f.close()
 
                 # place symbionts near
                 if fix_symbionts_near:
@@ -1592,9 +1604,17 @@ class TriLmp():
                     for command in postequilibration_lammps_commands:
                         self.lmp.command(command)
 
+                with open('LAMMPSfixes.dat', 'a+') as f:
+                    f.writelines('POST-equilibration: \n')
+                    for fix in self.L.fixes:
+                        f.writelines(f'{fix}\n')
+                    f.writelines('\n')
+                    f.close()
+
                 if self.debug_mode:
                     print("These are your current fixes: ")
                     print(self.L.fixes)
+
                     
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
@@ -1632,7 +1652,11 @@ class TriLmp():
 
     @_update_mesh_one
     def callback_one(self, lmp, ntimestep, nlocal, tag, x, f):
-        """!!!!!!!This function is used as callback to TRIMEM FROM LAMMPS!!!!!"""
+        """
+        !!!!!!!This function is used as callback to TRIMEM FROM LAMMPS!!!!!
+        This is where the forces on the membrane beads, computed by TriMEM
+        are extracted.
+        """
         #print(tag)
         #tag_clear=[x-1 for x in tag if x <= self.n_vertices]
         f[:self.n_vertices]=-self.estore.gradient(self.mesh.trimesh)
@@ -1747,7 +1771,6 @@ class TriLmp():
             with open(f"checkpoints/ckpt_MDs_{self.MDsteps}_.pickle", 'wb') as f:
                 pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-        # TEST HOW FAST THIS IS 
         # update reference properties
         self.estore.update_reference_properties()
         
