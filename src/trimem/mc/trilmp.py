@@ -105,6 +105,7 @@ from lammps import lammps, PyLammps, LAMMPS_INT, LMP_STYLE_GLOBAL, LMP_VAR_EQUAL
 _sp = u'\U0001f604'
 _nl = '\n'+_sp
 
+# functions used to write blocks of text
 def block(s):
     return _nl.join(s.split('\n'))
 
@@ -130,7 +131,11 @@ def dedent(s):
 ################################################################################
 
 class Timer():
-    "Storage for timer state to reinitialize PerformanceEnergyEvaluator after Reset"
+    """
+
+    Storage for timer state to reinitialize PerformanceEnergyEvaluator after Reset
+    
+    """
     def __init__(self,ptime,ts,ta,tan,ts_default,stime):
         self.performance_start=ptime
         self.performance_timestamps=ts
@@ -141,8 +146,12 @@ class Timer():
 
 class InitialState():
     def __init__(self,area,volume,curvature,bending,tethering):
-        """Storage for reference properties to reinitialize Estore after Reset. In case of reinstating Surface
-        Repulsion in TRIMEM a repulsion property would have to be added again """
+        """
+        
+        Storage for reference properties to reinitialize Estore after Reset. In case of reinstating Surface
+        Repulsion in TRIMEM a repulsion property would have to be added again 
+        
+        """
         self.area=area
         self.volume=volume
         self.curvature=curvature
@@ -151,7 +160,9 @@ class InitialState():
 
 class Beads():
     def __init__(self,n_beads, n_bead_types,bead_pos, bead_v, bead_sizes,bead_types):
-        """Storage for external bead parameters
+        """
+        
+        Storage for external bead parameters
         Args:
             n_beads      : number of external beads in the system
             n_bead_types : number of different types of beads used
@@ -174,7 +185,11 @@ class Beads():
         self.bead_sizes=bead_sizes  
 
 class OutputParams():
-    """Containter for parameters related to the output option """
+    """
+    
+    Containter for parameters related to the output option 
+    
+    """
     def __init__(self,
                  info,
                  thin,
@@ -203,7 +218,11 @@ class OutputParams():
         self.energy_increment=energy_increment
 
 class AlgoParams():
-    """Containter for parameters related to the algorithms used  -> See DEFAULT PARAMETERS section for description"""
+    """
+    
+    Containter for parameters related to the algorithms used  -> See DEFAULT PARAMETERS section for description
+    
+    """
     def __init__(self,
                  num_steps,
                  reinitialize_every,
@@ -270,7 +289,7 @@ class TriLmp():
                  a0=None,               # reference face area ('Area')
 
                  # TRIANGULATED MEMBRANE MECHANICAL PROPERTIES
-                 n_search="cell-list",       # neighbour list types ('cell and verlet') -> NOT USED
+                 n_search="cell_list",       # neighbour list types ('cell and verlet') -> NOT USED
                  rlist=0.1,                  # neighbour list cutoff -> NOT USED
                  exclusion_level=2,          # neighbourhood exclusion setting -> NOT IMPLEMENTED
                  rep_lc1=None,               # lower onset for surface repusion (default set below)
@@ -395,12 +414,12 @@ class TriLmp():
         self.test_mode            = test_mode
         self.equilibrated         = equilibrated
         self.equilibration_rounds = equilibration_rounds
-        self.acceptance_rate      = 0.0
         self.print_bending_energy = print_bending_energy
         self.periodic             = periodic
-        self.MDsteps              = 0.0
         self.traj_steps           = traj_steps
         self.n_bond_types         = n_bond_types
+        self.MDsteps              = 0.0
+        self.acceptance_rate      = 0.0
 
         # used for (TRIMEM) minimization
         self.flatten = True
@@ -417,16 +436,14 @@ class TriLmp():
 
         ########################################################################
         #                         MESH INITIALIZATION                          #
+        # Triangulated mesh used in simulations must be a TriMEM 'Mesh' object #
         ########################################################################
 
-        # mesh must be 'Mesh object'
-        # gets converted to Mesh.trimesh (TriMesh) internally
         self.mesh_points = mesh_points
         self.mesh_faces = mesh_faces
+        self.mesh_velocity=mesh_velocity
 
-        print("This is your mesh points ", self.mesh_points)
-        print("This is your mesh faces ", self.mesh_faces)
-
+        # [from TriMem doc] class trimem.mc.mesh.Mesh(points=None, cells=None)
         self.mesh = Mesh(points=self.mesh_points, cells=self.mesh_faces)
 
         if pure_MD:
@@ -434,35 +451,38 @@ class TriLmp():
         else:
             self.mesh_temp = Mesh(points=self.mesh_points, cells=self.mesh_faces)
 
-        self.mesh_velocity=mesh_velocity
+        # extract number of membrane vertices in simulation
         self.n_vertices=self.mesh.x.shape[0]
 
         ########################################################################
         #                       MESH BONDS/TETHERS                             #
         ########################################################################
 
+        # initialize bond class 
+        #[BondParams = class in the trimem.core module]
+        #[BondType   = class in the trimem.core module]
         self.bparams = m.BondParams()
         if issubclass(type(bond_type), str):
             self.bparams.type = self.bond_enums[bond_type]
         else:
             self.bparams.type=bond_type
+
+        # introduce steepness for bond potentials
         self.bparams.r = bond_r
 
-        if (lc1 is None) and (lc0 is None) and self.initialize:
-            a, l = m.avg_tri_props(self.mesh.trimesh)
-            self.bparams.lc0 = np.sqrt(3) # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
-            self.bparams.lc1 = 1.0        # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
-            self.bparams.a0 = a
-        else:
-            a, l = m.avg_tri_props(self.mesh.trimesh)
-            self.bparams.lc0 = lc0
-            self.bparams.lc1 = lc1
-            self.bparams.a0  = a
+        # MMB hardcoded scaling of the edges
+        a, l = m.avg_tri_props(self.mesh.trimesh)
+        self.bparams.lc0 = np.sqrt(3) # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
+        self.bparams.lc1 = 1.0        # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
+        self.bparams.a0 = a
 
         ########################################################################
-        #               SUPERFACE REPULSION (dealt by LAMMPS)                  #
+        #          INITIALIZATION OF SUPERFACE REPULSION FOR TRIMEM            #
+        # The code below is not used at the moment because TriLMP deals with   #
+        # surface repulsion using a LAMMPS table.                              #
         ########################################################################
 
+        # [from SurfaceRepulsionParams class in trimem.core]
         self.rparams = m.SurfaceRepulsionParams()
 
         # neighbour lists of TRIMEM are not used but kept here in case needed
@@ -482,7 +502,7 @@ class TriLmp():
         self.rparams.r = rep_r
 
         ########################################################################
-        #   PARAMETER CONTINUATION: translate energy params (see TRIMEM        #
+        #   PARAMETER CONTINUATION: translate energy params (see TRIMEM)       #
         ########################################################################
 
         self.cp = m.ContinuationParams()
@@ -539,13 +559,17 @@ class TriLmp():
 
         ########################################################################
         #                ENERGY MANAGE INITIALIZATION WITH TRIMEM              #
+        # From the TriMEM documentation:                                       #
+        # - The 'trimem.core.EnergyManager' manages a particular parametri-    #
+        #   zation of the Helfrich functional with additional penalties and    #
+        #   tether-regularization.                                             #
         ########################################################################
 
         if self.initialize:
-            # setup energy manager with initial mesh
+            # setup energy manager with initial mesh [class trimem.core.EnergyManager]
             self.estore = m.EnergyManagerNSR(self.mesh.trimesh, self.eparams)
 
-            #safe initial states property
+            #save initial states property
             self.initial_state=InitialState(self.estore.initial_props.area,
                                             self.estore.initial_props.volume,
                                             self.estore.initial_props.curvature,
@@ -557,6 +581,9 @@ class TriLmp():
 
         else:
             # reinitialize using saved initial state properties (for reference potential V, A, dA)
+            # the 'area', 'volume', 'curvature', 'bending' and 'thetering' properties must have been
+            # saved by the pickle checkpoint; this allows you to restart the simulation with the same
+            # specific properties
             self.initial_state = InitialState(area,
                                               volume,
                                               curvature,
@@ -569,6 +596,12 @@ class TriLmp():
             self.init_props.curvature = self.initial_state.curvature
             self.init_props.bending = self.initial_state.bending
             self.init_props.tethering = self.initial_state.tethering
+
+            #print(f"PASSING AREA: {area} INITIAL STATE AREA: {self.initial_state.area} INITIAL PROPS AREA: {self.initial_props.area}")
+            #print(f"PASSING VOLUME: {volume} INITIAL STATE VOLUME: {self.initial_state.volume} INITIAL PROPS VOLUME: {self.initial_props.volume}")
+            #print(f"PASSING CURVATURE: {curvature} INITIAL STATE CURVATURE: {self.initial_state.curvature} INITIAL PROPS CURVATURE: {self.initial_props.curvature}")
+            #print(f"PASSING BENDING: {bending} INITIAL STATE BENDING: {self.initial_state.bending} INITIAL PROPS BENDING: {self.initial_props.bending}")
+            #print(f"PASSING TETHERING: {tethering} INITIAL STATE BENDING: {self.initial_state.tethering} INITIAL PROPS TETHERING: {self.initial_props.tethering}")
 
             #recreate energy manager
             self.estore = m.EnergyManagerNSR(self.mesh.trimesh, self.eparams, self.init_props)
@@ -588,7 +621,7 @@ class TriLmp():
                          bead_types)
 
         ########################################################################
-        #                             EXTENSION: TETHERS                      #
+        #                             EXTENSION: TETHERS                       #
         ########################################################################
 
         bond_text="""
@@ -651,9 +684,8 @@ class TriLmp():
 
         ########################################################################
         #          LAMMPS SETUP AND COMMANDS REQUIRED DURING INIT              #
-        #  CAVEAT: Currently all the scripts and the callback to               #
-        # TRIMEM are critically reliant on the the setting:                    #
-        # " atom_modify sort 0 0.0 " in the input file                         #
+        #  Please do not remove the "atom_modify sort 0 0.0" from the          #  
+        #  LAMMPS input file. This is required for TriMEM                      #
         ########################################################################
 
         ########################################################################
@@ -681,8 +713,9 @@ class TriLmp():
             cmdargs.append('-log')
             cmdargs.append('none')
 
-        self.lmp = lammps(cmdargs=cmdargs)
-        self.L = PyLammps(ptr=self.lmp,verbose=False)
+        # create LAMMPS object and python wrapper (not needed?)
+        self.lmp             = lammps(cmdargs=cmdargs)
+        self.L               = PyLammps(ptr=self.lmp,verbose=False)
         total_particle_types = num_particle_types
 
         # define atom_style
@@ -694,8 +727,10 @@ class TriLmp():
             bond_dihedral_text+=" dihedral/types 1"
             bond_dihedral_text+=" extra/dihedral/per/atom 14"
         
+        # pass boundary conditions - periodic bc are useless (triangulated membrane does not do well across boundary)
         boundary_string = self.parse_boundary(periodic)
 
+        # basic system initialization
         basic_system = dedent(f"""\
             units lj
             dimension 3
@@ -709,6 +744,8 @@ class TriLmp():
             create_box {total_particle_types} box {bond_dihedral_text} extra/bond/per/atom 100 extra/special/per/atom 100
 
             run_style verlet
+
+            # TriMEM computation of the forces
             fix ext all external pf/callback 1 1
 
             timestep {self.algo_params.step_size}
@@ -735,11 +772,12 @@ class TriLmp():
         # INPUT FILE DEFINITION
         # LAMMPS ...............................................................
 
-        # extract bond topology from Trimesh object
-        self.edges = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f).edges_unique
-        self.edges=np.unique(self.edges,axis=0)
-        self.n_edges=self.edges.shape[0]
+        # extract bond topology from Trimesh object (Python library)
+        self.edges   = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f).edges_unique
+        self.edges   = np.unique(self.edges,axis=0)
+        self.n_edges = self.edges.shape[0]
 
+        # create (re)initialization file
         with open('sim_setup.in', 'w') as f:
 
             f.write('\n\n')
@@ -747,6 +785,7 @@ class TriLmp():
             f.write(f'{num_particle_types} atom types\n')
             f.write(f'{self.edges.shape[0]+n_tethers+self.n_slayer_bonds} bonds\n')
             f.write(f'{n_bond_types} bond types\n\n')
+
             # include dihedrals for s-layer
             if self.slayer:
                 f.write(f'{self.n_slayer_dihedrals} dihedrals\n')
@@ -817,10 +856,10 @@ class TriLmp():
             else:
                 f.write(f'Bonds # hybrid\n\n')
 
-            # first type of bond -- for the fluid membrane
+            # [BONDS] first type of bond -- for the fluid membrane
             for i in range(self.edges.shape[0]):
                 f.write(f'{i + 1} 1 {self.edges[i, 0] + 1} {self.edges[i, 1] + 1}\n')
-            # second type of bond -- for the slayer
+            # [BONDS] second type of bond -- for the slayer
             for i in range(self.n_slayer_bonds):
                 f.write(f'{self.edges.shape[0] + i + 1} 2 {self.slayer_bonds[i, 0] + self.n_vertices} {self.slayer_bonds[i, 1] + self.n_vertices}\n')
 
@@ -847,7 +886,6 @@ class TriLmp():
 
         # LAMMPS ...............................................................
         # TABLE FOR SURFACE REPULSION
-        # MW with modifications from MMB
         # Create python file implementing the repulsive part of the tether potential
         # as surface repulsion readable by the lammps pair_style
         # python uses the pair_style defined above to create a lookup
@@ -979,14 +1017,14 @@ class TriLmp():
         else:
             self.lmp.command('velocity all zero linear')
 
-        # setting or reinitializing mesh velocities
+        # setting or reinitializing mesh velocities (important for pickle)
         if np.any(self.mesh_velocity):
             velocities = self.lmp.numpy.extract_atom("v")
             for i in range(self.n_vertices):
                 velocities[i, :]=self.mesh_velocity[i,:]
 
         # LAMMPS ...............................................................
-        # INTERACTIONS AND TRIMEM CALLBACK (NOT TOUCHING!)
+        # INTERACTIONS AND TRIMEM CALLBACK
         # LAMMPS ...............................................................
 
         # set callback for helfrich gradient to be handed from TRIMEM to LAMMPS via fix external "ext"
@@ -995,12 +1033,12 @@ class TriLmp():
         # Temperature in LAMMPS set to fixed initial temperature
         self.T = self.algo_params.initial_temperature
 
-        # approx. initialization of energy components (i.e. first step for HMC will probably be accepted, irrelevant for pureMD)
-        v=self.lmp.numpy.extract_atom("v")
-        self.pe=0.0
-        self.ke=0.5 * self.algo_params.momentum_variance*v.ravel().dot(v.ravel())
-        self.he=self.estore.energy(self.mesh.trimesh)#+0.5 * v.ravel().dot(v.ravel())
-        self.energy_new=0.0
+        # initialization of system energy components for HMC (irrelevant for pureMD)
+        v       = self.lmp.numpy.extract_atom("v")
+        self.pe = 0.0
+        self.ke = 0.5 * self.algo_params.momentum_variance*v.ravel().dot(v.ravel())
+        self.he = self.estore.energy(self.mesh.trimesh)#+0.5 * v.ravel().dot(v.ravel())
+        self.energy_new = 0.0
 
         ########################################################################
         #                           BOOK-KEEPING                               #
@@ -1029,7 +1067,9 @@ class TriLmp():
         self.refresh_step = max(self.algo_params.refresh, 0)
 
         ########################################################################
-        #                       TRAJECTORY WRITERS                             #
+        #          TRAJECTORY WRITERS (NOT USED ATM)                           #
+        # Might be better to use LAMMPS' capabilities to dump desired system   #
+        # properties. It can allow better handling of memory usage             #
         ########################################################################
 
         if self.output_params.output_format=='xyz' or self.output_params.output_format=='vtu' or self.output_params.output_format=='xdmf':
@@ -1099,6 +1139,7 @@ class TriLmp():
 
             del_com='remove'
             
+            # 'test_mode' allows for time optimization (less neighbour lists built)
             if self.test_mode:
 
                 for i in range(nf-1):
@@ -1124,6 +1165,8 @@ class TriLmp():
                 self.lmp.command(f'group flip_off id {flip_id[nf-1][2] + 1} {flip_id[nf-1][3] + 1}')
                 self.lmp.command(f'delete_bonds flip_off bond 1 remove special') # maybe the special is not needed here?
                 self.lmp.command('group flip_off clear')
+
+            # original implementation - more time-consuming
             else:
 
                 for i in range(nf):
@@ -1143,16 +1186,18 @@ class TriLmp():
         """Print algorithmic information."""
         i_total = sum(self.counter.values())
         if self.output_params.info and i_total % self.output_params.info == 0:
+
             # MMB CHANGED -- MAKING SURE THAT NUMBER OF EDGES KNOWS ABOUT THE FLIP RATIO
             n_edges = self.mesh.trimesh.n_edges()*self.algo_params.flip_ratio
             ar      = self.f_acc / (self.f_i * n_edges) if not self.f_i == 0 else 0.0
             self.acceptance_rate = ar
-            #print("Accepted", self.f_acc)
-            #print("Number of candidate edges", n_edges)
 
-            print("\n-- MCFlips-Step ", self.counter["flip"])
-            print("----- flip-accept: ", ar)
-            print("----- flip-rate:   ", self.algo_params.flip_ratio)
+            print(f"Number of candidate edges: {n_edges}")
+            print(f"Accepted: {self.f_acc}")
+            print(f"\n-- MCFlips-Step {self.counter["flip"]}")
+            print(f"----- flip-accept: {ar}")
+            print(f"----- flip-rate:   {self.algo_params.flip_ratio}")
+
             self.f_acc = 0
             self.f_i   = 0
             self.f_num = 0
@@ -1165,14 +1210,13 @@ class TriLmp():
             # time the flipping
             start = time.time()
 
-        """Make one step."""
+        # make one step
         flip_ids=self._flips()
 
         if self.debug_mode:
             time_flips_trimem = time.time()
-
+        
         self.mesh.f[:]=self.mesh.f
-        #print(flip_ids)
         self.lmp_flip(flip_ids)
 
         if self.debug_mode:
@@ -1215,11 +1259,7 @@ class TriLmp():
 
             #calute energy - future make a flag system to avoid double calculation if lst step was also hmc step
             if self.algo_params.thermal_velocities:
-                 self.atom_props = f"""
-
-                            velocity        vertices create {self.T} {np.random.randint(1,9999999)} mom yes dist gaussian
-
-                            """
+                 self.atom_props = f"""velocity        vertices create {self.T} {np.random.randint(1,9999999)} mom yes dist gaussian"""
                  self.lmp.commands_string(self.atom_props)
                  v = self.lmp.numpy.extract_atom("v")
                  self.ke= 0.5 * (self.masses[:,np.newaxis]*v).ravel().dot(v.ravel())
@@ -1231,20 +1271,13 @@ class TriLmp():
             self.energy = self.pe + self.ke + self.he
 
             #run MD trajectory
-
             #self.lmp.command(f'run {self.algo_params.traj_steps} post no')
-
-
-
             self.L.run(self.algo_params.traj_steps)
 
             #set global energy in lammps
             #self.lmp.fix_external_set_energy_global("ext", self.estore.energy(self.mesh.trimesh))
 
             # calculate energy difference -> future: do it all in lamps via the set command above (incl. SP and bead interactions)
-
-
-
             if not self.beads.n_beads:
                 self.mesh.x[:] = self.lmp.numpy.extract_atom("x")
             else:
@@ -1256,14 +1289,11 @@ class TriLmp():
             self.ke_new=self.lmp.numpy.extract_compute("th_ke",LMP_STYLE_GLOBAL,LMP_TYPE_SCALAR)
             self.pe_new=self.lmp.numpy.extract_compute("th_pe", LMP_STYLE_GLOBAL, LMP_TYPE_SCALAR)
 
-
             # add helfrich energy via Trimem
             self.energy_new = self.estore.energy(self.mesh.trimesh) + self.ke_new + self.pe_new
 
-
             dh = (self.energy_new- self.energy) / self.T
             print(dh)
-
 
             # compute acceptance probability: min(1, np.exp(-de))
             a = 1.0 if dh <= 0 else np.exp(-dh)
@@ -1286,8 +1316,6 @@ class TriLmp():
                         for i in range(self.n_vertices):
                             atoms_alloc[i].position[:]=self.mesh_temp[i,:]
                             atoms_alloc[i].velocity[:]=self.velocities_temp[i,:]
-
-
                 else:
 
                     self.mesh.x[:] = self.mesh_temp[:]
@@ -1309,13 +1337,12 @@ class TriLmp():
                             atoms_alloc[i].position[:] = self.beads_temp[i - self.n_vertices, :]
                             atoms_alloc[i].velocity[:] = self.velocities_temp[i, :]
 
-                # CAVEAT using thermal_velocities=False and pure_MD=False can result in a deadlock
+            # CAVEAT using thermal_velocities=False and pure_MD=False can result in a deadlock
             # UPDATE COUNTERS
             self.m_i += 1
             self.counter["move"] += 1
 
-
-        # actual MD run of the code
+        # pure MD run of the code
         else:
             
             if self.debug_mode:
@@ -1328,6 +1355,7 @@ class TriLmp():
             self.counter["move"] += 1
 
             if self.debug_mode:
+
                 # MMB timing purposes
                 end = time.time()
                 ff = open("TriLMP_optimization.dat", "a+")
@@ -1348,11 +1376,7 @@ class TriLmp():
             self.m_i = 0
 
     ############################################################################
-    #                        *SELF FUNCTIONS*: RUN                             #
-    # MW: In this section we combine all functions that are used for           #
-    # either HMC/pure_MD run or minimize including the wrapper                 #
-    # functions used for updating the mesh (on the TRIMEM side)                #
-    # when evaluating the gradient                                             #
+    #                        *SELF FUNCTIONS*: RUN                             #                                            #
     ############################################################################
 
     def halt_symbiont_simulation(self, step, check_outofrange, check_outofrange_freq, check_outofrange_cutoff):
@@ -1369,7 +1393,7 @@ class TriLmp():
 
     def step_random(self):
 
-        """Make one step each with each algorithm."""
+        """ Make one step each with each algorithm """
         if np.random.choice(2) == 0:
             t_fix = time.time()
             self.hmc_step()
@@ -1385,10 +1409,15 @@ class TriLmp():
 
     def step_alternate(self):
 
-        """Make one step each with each algorithm."""
+        """
+        Make one step each with each algorithm.
+        (note that in general this functionality is not used)
+        """
 
         t_fix = time.time()
         self.hmc_step()
+        # after performing the MD section of the simulation, update counter
+        self.MDsteps +=self.traj_steps
         self.timer.timearray_new[0] += (time.time() - t_fix)
         t_fix = time.time()
         self.flip_step()
@@ -1422,22 +1451,11 @@ class TriLmp():
 
         print("No errors to report for run. Simulation begins.")
 
-    def __getstate__(self):
-        # This method is called when pickling, customize the state saved
-        return (self.mesh_points, self.mesh_faces)
-
-    def __setstate__(self, state):
-        # This method is called when unpickling, customize how state is restored
-        self.mesh_points, self.mesh_faces = state
-
     def run(
             self, N=0, integrators_defined = False, check_outofrange = False, 
             check_outofrange_freq = -1, check_outofrange_cutoff = -1, fix_symbionts_near = True, 
             postequilibration_lammps_commands = None, seed = 123, current_step = 0
         ):
-
-        # set the numpy seed (MD + MC stepping)
-        np.random.seed(seed=seed)
 
         """
         MAIN TRILMP FUNCTION: Combine MD + MC runs
@@ -1454,6 +1472,9 @@ class TriLmp():
 
         - fix_symbionts_near : place symbionts within interaction range of membrane
         """
+
+        # set the numpy seed (MD + MC stepping)
+        np.random.seed(seed=seed)
 
         # -------------------------------------------------
         # clear up the file for the timing
@@ -1510,7 +1531,6 @@ class TriLmp():
             # check if simulation must stop
             self.halt_symbiont_simulation(i, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
 
-
             # post equilibration update, if it applies
             if self.MDsteps==self.equilibration_rounds and self.equilibrated == False:
 
@@ -1518,12 +1538,15 @@ class TriLmp():
                     print("These are your current fixes pre equilibration: ")
                     print(self.L.fixes)
 
+                """
+                # write down existing fixes
                 with open('LAMMPSfixes.dat', 'w') as f:
                     f.writelines('Pre-equilibration: \n')
                     for fix in self.L.fixes:
                         f.writelines(f'{fix}\n')
                     f.writelines('\n')
                     f.close()
+                """
 
                 # place symbionts near
                 if fix_symbionts_near:
@@ -1604,12 +1627,15 @@ class TriLmp():
                     for command in postequilibration_lammps_commands:
                         self.lmp.command(command)
 
+                """
+                # save post-equilibration fixes
                 with open('LAMMPSfixes.dat', 'a+') as f:
                     f.writelines('POST-equilibration: \n')
                     for fix in self.L.fixes:
                         f.writelines(f'{fix}\n')
                     f.writelines('\n')
                     f.close()
+                """
 
                 if self.debug_mode:
                     print("These are your current fixes: ")
@@ -1620,59 +1646,62 @@ class TriLmp():
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
     ############################################################################
 
-    # decorators for meshupdates when calling force function
+    # decorator that updates the mesh
     def _update_mesh(func):
-        
-        #VARIANT FOR USE WITH self.minim():Decorates a method with an update of the mesh vertices.
 
-        #The method must have signature f(self, x, \*args, \*\*kwargs) with
-        #x being the new vertex coordinates.
+        """
+        VARIANT FOR USE WITH self.minim()
+        Decorates a method with an update of the mesh vertices.
+        
+        The method must have signature f(self, x, \*args, \*\*kwargs) with
+        x being the new vertex coordinates.
+
+        Note that it is also a decorator of the callback function.
+        """
 
         def wrap(self, x, *args, **kwargs):
             self.mesh.x = x.reshape(self.mesh.x.shape)
             return func(self, x, *args, **kwargs)
+        
         wrap.__doc__  = func.__doc__
         wrap.__name__ = func.__name__
+
         return wrap
 
+    # decorator that updates the mesh
     def _update_mesh_one(func):
-        #VARIANT FOR USE WITH LAMMPS: Decorates a method with an update of the mesh vertices.
 
-        #The method must have signature f(self, lmp, ntimestep, nlocal, tag, x,f \*args, \*\*kwargs) with
-        #x being the new vertex coordinates.
+        """
+        VARIANT FOR USE WITH LAMMPS: Decorates a method with an update of the mesh vertices.
+
+        The method must have signature f(self, lmp, ntimestep, nlocal, tag, x,f \*args, \*\*kwargs) with
+        x being the new vertex coordinates.
+        """
         
         def wrap(self,  lmp, ntimestep, nlocal, tag, x,f,  *args, **kwargs):
 
             self.mesh.x = x[:self.n_vertices].reshape(self.mesh.x[:self.n_vertices].shape)
             #self.lmp.fix_external_set_energy_global("ext", self.estore.energy(self.mesh.trimesh))
             return func(self, lmp, ntimestep, nlocal, tag, x,f, *args, **kwargs)
+        
         wrap.__doc__  = func.__doc__
         wrap.__name__ = func.__name__
         return wrap
 
+    # for LAMMPS force update
     @_update_mesh_one
     def callback_one(self, lmp, ntimestep, nlocal, tag, x, f):
         """
-        !!!!!!!This function is used as callback to TRIMEM FROM LAMMPS!!!!!
+        !!!!!!! This function is used as callback to TRIMEM FROM LAMMPS !!!!!
         This is where the forces on the membrane beads, computed by TriMEM
-        are extracted.
+        are extracted, and LAMMPS uses them to act on the membrane beads.
         """
         #print(tag)
         #tag_clear=[x-1 for x in tag if x <= self.n_vertices]
         f[:self.n_vertices]=-self.estore.gradient(self.mesh.trimesh)
 
-        ## UNCOMMENT IF TRIMEM SHOULD GET THE ENERGY IN REALTIME
-        #self.lmp.fix_external_set_energy_global("ext", self.estore.energy(self.mesh.trimesh))
-
-    @_update_mesh_one
-    def callback_harm(self, lmp, ntimestep, nlocal, tag, x, f):
-        """ SIMPLE HARMONIC FORCE TO TEST CALLBACK FUNCTIONALITY """
-        f[:,0] = -(x[:,0]-2)
-        f[:,1] = np.zeros_like(x[:,1])
-        f[:, 2] = np.zeros_like(x[:, 2])
-
-        #print(np.max(f))
-        # self.lmp.fix_external_set_energy_global("ext", self.estore.energy(self.mesh.trimesh))
+        ## UNCOMMENT IF TRIMEM SHOULD GET THE ENERGY IN REALTIME - MMB uncommenting
+        self.lmp.fix_external_set_energy_global("ext", self.estore.energy(self.mesh.trimesh))
 
     # for minimization
     @_update_mesh
@@ -1744,24 +1773,14 @@ class TriLmp():
             kwargs: ignored
         """
 
+        # update reference properties
+        self.estore.update_reference_properties()
+
         i = sum(steps.values()) #py3.10: steps.total()
 
         if self.output_params.info and (i % self.output_params.info == 0):
             print("\n-- Energy-Evaluation-Step ", i)
             self.estore.print_info(self.mesh.trimesh)
-
-        """
-        # MMB CHANGED -- Deal with the putput through LAMMPS
-        if self.output_params.thin and (i % self.output_params.thin == 0):
-            self.output(i)
-            #self.output.write_points_cells(self.mesh.x, self.mesh.f)
-            #bonds_lmp = self.lmp.numpy.gather_bonds()[:, 1:3]
-            #bonds_lmp = np.unique(bonds_lmp, axis=0)
-            #bonds_lmp = (np.sort(bonds_lmp, axis=1))
-            #with open('bonds_topo.xyz','a+') as f:
-            #    for i in range(bonds_lmp.shape[0])
-            #    f.write(f'{i}')
-        """
 
         if self.output_params.checkpoint_every and (i % self.output_params.checkpoint_every == 0):
             # make checkpoints alternating between two points
@@ -1770,9 +1789,6 @@ class TriLmp():
         if (self.MDsteps % self.output_params.info == 0):
             with open(f"checkpoints/ckpt_MDs_{self.MDsteps}_.pickle", 'wb') as f:
                 pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-        # update reference properties
-        self.estore.update_reference_properties()
         
         # MMB open to clean-up
         if  self.MDsteps ==1:
@@ -1851,7 +1867,8 @@ class TriLmp():
     ############################################################################
 
     def minim(self):
-        """Run (precursor) minimization.
+        """
+        Run (precursor) minimization.
 
         Performs a minimization of the Helfrich bending energy as defined
         by the `config`.
@@ -1861,11 +1878,8 @@ class TriLmp():
             estore (EnergyManager): EnergyManager.
             config (dict-like): run-config file.
 
-
         """
         refresh_safe = self.algo_params.refresh
-
-
 
         if not self.algo_params.refresh == 1:
             wstr = f"SURFACEREPULSION::refresh is set to {self.algo_params.refresh}, " + \
@@ -1884,8 +1898,6 @@ class TriLmp():
         options = {
             "maxiter": self.algo_params.maxiter,
             "disp": 0,
-
-
         }
         res = minimize(
             self.fun,
@@ -1910,8 +1922,7 @@ class TriLmp():
         #self.reset_output_counter()
 
     ############################################################################
-    #              *SELF FUNCTIONS*: CHECKPOINT CREATION                       #
-    #  MW   PICKLE REDUCTION USED FOR CHECKPOINT CREATION!!!                   #
+    #        *SELF FUNCTIONS*: CHECKPOINT CREATION - USES PICKLE               #
     ############################################################################
 
     def __reduce__(self):
@@ -2001,6 +2012,14 @@ class TriLmp():
                 self.beads.types,
                 self.n_bond_types,
                 )
+    
+    def __getstate__(self):
+        # This method is called when pickling, customize the state saved
+        return (self.mesh_points, self.mesh_faces)
+
+    def __setstate__(self, state):
+        # This method is called when unpickling, customize how state is restored
+        self.mesh_points, self.mesh_faces = state
 
     # checkpoints using pickle
     def make_checkpoint_handle(self):
@@ -2054,55 +2073,6 @@ class TriLmp():
         self.output = make_output(self.output_params.output_format, self.output_params.output_prefix,
                                   self.output_params.output_counter, callback=self.update_output_counter)
 
-    # add several interactions
-    def pair_cmds(self):
-        # TODO: is this still needed?
-        # TODO: what is even going on here? Why 3 layer nested functions?
-        def add_pair(name:str,cutoff:float,args:str,modify_coeff_cmds:str):
-            pairs.append((name,cutoff,args,modify_coeff_cmds))
-
-        def pair_style_cmd():
-
-            def pair_style_2_style_cmd(name:str,cutoff:float,args:str):
-                l=[name]
-                if not name.startswith('table'):
-                    l.append(str(cutoff))
-                l.append(args)
-                return ' '.join(l)
-
-            pair_style='hybrid/overlay' if overlay else 'hybrid'
-            l=['pair_style',pair_style]
-            for (name,cutoff,args,*_) in pairs:
-                l.append(pair_style_2_style_cmd(name,cutoff,args))
-            return ' '.join(l)
-
-        # surface repulsion
-        # write_srp_table()
-
-        pairs:list[tuple[str,float,str,str]]=[]
-        overlay=True
-
-        # todo: performance : change to table bitmap style for improved performance
-        # todo: performance : change to non-table style
-        assert self.eparams.repulse_params.lc1
-        add_pair("table",self.eparams.repulse_params.lc1, "linear 2000",dedent(f"""
-        pair_modify pair table special lj/coul 0.0 0.0 0.0 tail no
-        pair_coeff 1 1 table trimem_srp.table trimem_srp
-        """))
-
-        if self.num_particle_types>1:
-            overlay = True
-        add_pair("lj/cut","2.5","",dedent(f"""\
-            pair_coeff * * lj/cut 0 0 0
-        """))
-
-        l=[]
-
-        l.append(pair_style_cmd())
-        for pair in pairs:
-            l.append(pair[-1])
-        return '\n'.join(l)
-
     @staticmethod
     def parse_boundary(periodic: pyUnion[bool, list[bool]]) -> str:
         if isinstance(periodic, bool):
@@ -2111,6 +2081,7 @@ class TriLmp():
             return " ".join("p" if p else "f" for p in periodic)
         else:
             raise ValueError("periodic must be a bool or a list of 3 bools")
+        
 ################################################################################
 #                       READ AND LOAD CHECKPOINTS                              #
 ################################################################################
