@@ -118,17 +118,23 @@ with ```exponent = 7```. In principle, the $\varepsilon$ in the expresion was sp
 
 ## Far-field vs Near-field implementation
 While the far-field phoretic velocities are
+
 $$ 
 \vec{v}_1 = \mu_1 \alpha_2 \frac{R^2}{D (\Delta + 2R)^2} \vec{e} 
 $$
+
 $$ 
 \vec{v}_2 = -\mu_2 \alpha_1 \frac{R^2}{D (\Delta + 2R)^2} \vec{e} 
 $$
+
 where $\vec{e}$ is a unit vector that points from 2 to 1, the expression for the near-field phoretic velocities is
+
 $$
 \vec{v}_1 = \gamma(\Delta) [\mu_1 \alpha_1 \varepsilon(\Delta) + \alpha_2 \mu_1] \vec{e}
 $$
+
 $$
 \vec{v}_2 = -\gamma(\Delta) [\mu_2 \alpha_2 \varepsilon(\Delta) + \alpha_1 \mu_2] \vec{e}
 $$
+
 where $\gamma(\Delta)$ and $\varepsilon(\Delta)$ come from the tables computed by Mike.
