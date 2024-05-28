@@ -1112,7 +1112,8 @@ class TriLmp():
             self._flips = lambda: m.pflip_nsr(self.mesh.trimesh, self.estore, self.algo_params.flip_ratio)
         else:
             raise ValueError("Wrong flip-type: {}".format(self.algo_params.flip_type))
-
+        
+        print("End of initialization (or reloading).")
         ########################################################################
         #                       END OF INIT                                    #
         ########################################################################
@@ -1194,7 +1195,7 @@ class TriLmp():
 
             print(f"Number of candidate edges: {n_edges}")
             print(f"Accepted: {self.f_acc}")
-            print(f"\n-- MCFlips-Step {self.counter["flip"]}")
+            print(f"\n-- MCFlips-Step {self.counter['flip']}")
             print(f"----- flip-accept: {ar}")
             print(f"----- flip-rate:   {self.algo_params.flip_ratio}")
 
@@ -1454,7 +1455,9 @@ class TriLmp():
     def run(
             self, N=0, integrators_defined = False, check_outofrange = False, 
             check_outofrange_freq = -1, check_outofrange_cutoff = -1, fix_symbionts_near = True, 
-            postequilibration_lammps_commands = None, seed = 123, current_step = 0
+            postequilibration_lammps_commands = None, seed = 123, current_step = 0,
+            step_dependent_protocol = False, step_protocol_commands = None, step_protocol_frequency = 0,
+            steps_in_protocol = 0
         ):
 
         """
@@ -1508,12 +1511,17 @@ class TriLmp():
         # counters for MD steps
         i = -1
         self.MDsteps = 0
+        oldsteps = -1
+
         if current_step:
             self.MDsteps = current_step
             N += current_step
 
         # initial conditions -- record
         self.callback(np.copy(self.mesh.x),self.counter)
+
+        if step_dependent_protocol:
+            applied_protocol = 0
 
         # run simulation for dictated number
         # of MD steps
@@ -1641,6 +1649,18 @@ class TriLmp():
                     print("These are your current fixes: ")
                     print(self.L.fixes)
 
+            # protocols that have to be added after equilibration
+            if (self.equilibrated) and (step_dependent_protocol):
+                # if it is the frequency at which we want to apply the protocol
+                if (self.MDsteps % step_protocol_frequency == 0) and self.MDsteps!= oldsteps:
+                    # if we have not applied all protocol steps
+                    if applied_protocol<steps_in_protocol:
+                        for command in step_protocol_commands[applied_protocol]:
+                            self.lmp.command(command)
+                        # check what is the protocol step that has been applied
+                        applied_protocol+=1 
+
+                oldsteps = self.MDsteps
                     
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
@@ -1653,7 +1673,7 @@ class TriLmp():
         VARIANT FOR USE WITH self.minim()
         Decorates a method with an update of the mesh vertices.
         
-        The method must have signature f(self, x, \*args, \*\*kwargs) with
+        The method must have signature f(self, x, args, kwargs) with
         x being the new vertex coordinates.
 
         Note that it is also a decorator of the callback function.
@@ -1674,7 +1694,7 @@ class TriLmp():
         """
         VARIANT FOR USE WITH LAMMPS: Decorates a method with an update of the mesh vertices.
 
-        The method must have signature f(self, lmp, ntimestep, nlocal, tag, x,f \*args, \*\*kwargs) with
+        The method must have signature f(self, lmp, ntimestep, nlocal, tag, x,f args, kwargs) with
         x being the new vertex coordinates.
         """
         
