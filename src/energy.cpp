@@ -13,8 +13,6 @@
 namespace trimem {
 
 
-
-
 EnergyManager::EnergyManager(const TriMesh& mesh,const EnergyParams& energy_params) :
     params(energy_params)
 {
