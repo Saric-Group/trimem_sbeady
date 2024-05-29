@@ -165,8 +165,8 @@ void EnergyManager::print_info(const TriMesh& mesh)
   out << "  curvature: " << props.curvature << "\n";
   out << "energies:\n";
   out << "  area:      " << area_penalty(params, props, ref_props) << "\n";
-  out << "  volume:    " << volume_penalty(params, props, ref_props) << "\n";
-  out << "  area diff: " << curvature_penalty(params, props, ref_props) << "\n";
+  out << "  volume(mmb sign):    " << volume_penalty(params, props, ref_props) << "\n";
+  out << "  area diff(mmb sign): " << curvature_penalty(params, props, ref_props) << "\n";
   out << "  bending:   " << helfrich_energy(params, props) << "\n";
   out << "  tether:    " << tether_penalty(params, props) << "\n";
   out << "  repulsion: " << repulsion_penalty(params, props) << "\n";
@@ -347,8 +347,8 @@ void EnergyManagerNSR::print_info(const TriMesh& mesh)
   out << "  curvature: " << props.curvature << "\n";
   out << "energies:\n";
   out << "  area:      " << area_penalty_nsr(params, props, ref_props) << "\n";
-  out << "  volume:    " << volume_penalty_nsr(params, props, ref_props) << "\n";
-  out << "  area diff: " << curvature_penalty_nsr(params, props, ref_props) << "\n";
+  out << "  volume(MMB SIGN):    " << volume_penalty_nsr(params, props, ref_props) << "\n";
+  out << "  area diff(MMB SIGN): " << curvature_penalty_nsr(params, props, ref_props) << "\n";
   out << "  bending:   " << helfrich_energy_nsr(params, props) << "\n";
   out << "  tether:    " << tether_penalty_nsr(params, props) << "\n";
 
