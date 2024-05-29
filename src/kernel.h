@@ -37,37 +37,59 @@ Point area_penalty_grad(const EnergyParams& params,
 real volume_penalty(const EnergyParams& params,
                     const VertexProperties& props,
                     const VertexProperties& ref_props)
-{
-    real d = props.volume / ref_props.volume - 1.0;
-    return params.kappa_v * d * d;
+{   
+    // MMB CHANGE
+    if(ref_props.volume == 0){
+        return 0;
+    else{
+        real d = props.volume / ref_props.volume - 1.0;
+        return params.kappa_v * d * d;
+    }
 }
 
 Point volume_penalty_grad(const EnergyParams& params,
                           const VertexProperties& props,
                           const VertexProperties& ref_props,
                           const Point& d_volume)
-{
-    real d = props.volume / ref_props.volume - 1.0;
-    real fac = 2.0 * params.kappa_v / ref_props.volume * d;
-    return fac * d_volume;
+{   
+    // MMB CHANGE
+    if(ref_props.volume == 0){
+        return 0;
+    else{
+        real d = props.volume / ref_props.volume - 1.0;
+        real fac = 2.0 * params.kappa_v / ref_props.volume * d;
+        return fac * d_volume;
+    }
 }
 
 real curvature_penalty(const EnergyParams& params,
                        const VertexProperties& props,
                        const VertexProperties& ref_props)
-{
-    real d = props.curvature / ref_props.curvature - 1.0;
-    return params.kappa_c * d * d;
+{   
+    // MMB CHANGE
+    if (ref_props.curvature == 0){
+        return 0;
+    }
+    else{
+        real d = props.curvature / ref_props.curvature - 1.0;
+        return params.kappa_c * d * d;
+    }
 }
 
 Point curvature_penalty_grad(const EnergyParams& params,
                              const VertexProperties& props,
                              const VertexProperties& ref_props,
                              const Point& d_curvature)
-{
-    real d = props.curvature / ref_props.curvature - 1.0;
-    real fac = 2.0 * params.kappa_c / ref_props.curvature * d;
-    return fac * d_curvature;
+{   
+    // MMB CHANGE
+    if(ref_props.curvature == 0){
+        return 0;
+    }
+    else{
+        real d = props.curvature / ref_props.curvature - 1.0;
+        real fac = 2.0 * params.kappa_c / ref_props.curvature * d;
+        return fac * d_curvature;
+    }
 }
 
 real tether_penalty(const EnergyParams& params, const VertexProperties& props)
