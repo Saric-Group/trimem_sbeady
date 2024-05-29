@@ -135,8 +135,15 @@ real trimem_energy(const EnergyParams& params,
 {
     real energy = 0.0;
     energy += area_penalty(params, props, ref_props);
-    energy += volume_penalty(params, props, ref_props);
+
+    // MMB CHANGED
+    if (ref_props.volume!=0){
+      energy += volume_penalty(params, props, ref_props);
+    }
+    if (ref_props.curvature!=0){
     energy += curvature_penalty(params, props, ref_props);
+    }
+  
     energy += tether_penalty(params, props);
     energy += repulsion_penalty(params, props);
     energy += helfrich_energy(params, props);
@@ -150,8 +157,15 @@ Point trimem_gradient(const EnergyParams& params,
 {
     Point grad(0.0);
     grad += area_penalty_grad(params, props, ref_props, gprops.area);
-    grad += volume_penalty_grad(params, props, ref_props,  gprops.volume);
-    grad += curvature_penalty_grad(params, props, ref_props, gprops.curvature);
+
+    //MMB CHANGED
+    if (ref_props.volume !=0){
+      grad += volume_penalty_grad(params, props, ref_props,  gprops.volume);
+    }
+    if(ref_props.curvature != 0){
+      grad += curvature_penalty_grad(params, props, ref_props, gprops.curvature);
+    }
+  
     grad += tether_penalty_grad(params, props, gprops.tethering);
     grad += repulsion_penalty_grad(params, props, gprops.repulsion);
     grad += helfrich_energy_grad(params, props, gprops.bending);
@@ -253,8 +267,15 @@ real trimem_energy_nsr(const EnergyParams& params,
 {
     real energy = 0.0;
     energy += area_penalty_nsr(params, props, ref_props);
-    energy += volume_penalty_nsr(params, props, ref_props);
-    energy += curvature_penalty_nsr(params, props, ref_props);
+
+    // MMB CHANGED
+    if (ref_props.volume != 0){
+      energy += volume_penalty_nsr(params, props, ref_props);
+    }
+
+    if (ref_props.curvature !=0){
+      energy += curvature_penalty_nsr(params, props, ref_props);
+    }
     energy += tether_penalty_nsr(params, props);
     energy += helfrich_energy_nsr(params, props);
     return energy;
@@ -267,8 +288,12 @@ Point trimem_gradient_nsr(const EnergyParams& params,
 {
     Point grad(0.0);
     grad += area_penalty_grad_nsr(params, props, ref_props, gprops.area);
-    grad += volume_penalty_grad_nsr(params, props, ref_props,  gprops.volume);
-    grad += curvature_penalty_grad_nsr(params, props, ref_props, gprops.curvature);
+    if(ref_props.volume !=0){
+      grad += volume_penalty_grad_nsr(params, props, ref_props,  gprops.volume);
+    }
+    if(ref_props.curvature !=0){
+      grad += curvature_penalty_grad_nsr(params, props, ref_props, gprops.curvature);
+    }
     grad += tether_penalty_grad_nsr(params, props, gprops.tethering);
     grad += helfrich_energy_grad_nsr(params, props, gprops.bending);
     return grad;
