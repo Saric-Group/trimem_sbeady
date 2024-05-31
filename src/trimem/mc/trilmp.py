@@ -280,6 +280,7 @@ class TriLmp():
                  mesh_points=None,    # positions of membrane vertices
                  mesh_faces=None,     # faces defining mesh
                  mesh_velocity=None,  # initial velocities
+                 vertices_at_edge=None, # vertices at the edge of a flat membrane
 
                  # TRIANGULATED MEMBRANE BONDS
                  bond_type='Edge',      # 'Edge' or 'Area
@@ -442,6 +443,7 @@ class TriLmp():
         self.mesh_points = mesh_points
         self.mesh_faces = mesh_faces
         self.mesh_velocity=mesh_velocity
+        self.vertices_at_edge=np.array(vertices_at_edge)
 
         # [from TriMem doc] class trimem.mc.mesh.Mesh(points=None, cells=None)
         self.mesh = Mesh(points=self.mesh_points, cells=self.mesh_faces)
@@ -1134,8 +1136,28 @@ class TriLmp():
     # function used for flipping
     def lmp_flip(self,flip_id):
 
-        nf=flip_id[-1][0]
 
+        nf=flip_id[-1][0]
+        
+        """
+        # MMB CHANGED
+        if np.any(self.vertices_at_edge):
+            # Check for elements in B
+            mask = np.isin(flip_id, self.vertices_at_edge)
+            print(mask)
+            # Check rows that do not contain vertex at the edge
+            rows_without_edge_vertices = ~mask.any(axis=1)
+            print(rows_without_edge_vertices)
+            indices = np.where(rows_without_edge_vertices)[0]
+            if len(indices)>0:
+                # Filter rows
+                flip_id = np.array(flip_id)
+                flip_id = flip_id[indices]
+                nf = len(flip_id)
+            else:
+                nf = 0
+        """
+        
         if nf:
 
             del_com='remove'
@@ -1720,6 +1742,10 @@ class TriLmp():
         #tag_clear=[x-1 for x in tag if x <= self.n_vertices]
         f[:self.n_vertices]=-self.estore.gradient(self.mesh.trimesh)
 
+        # if needed for flat membrane, correct
+        if np.any(self.vertices_at_edge):
+            f[self.vertices_at_edge] = 0.0
+
         ## UNCOMMENT IF TRIMEM SHOULD GET THE ENERGY IN REALTIME - MMB uncommenting
         self.lmp.fix_external_set_energy_global("ext", self.estore.energy(self.mesh.trimesh))
 
@@ -1954,6 +1980,7 @@ class TriLmp():
                 self.mesh.x,
                 self.mesh.f,
                 self.lmp.numpy.extract_atom('v')[:self.n_vertices,:],
+                self.vertices_at_edge,
                 self.estore.eparams.bond_params.type,
                 self.estore.eparams.bond_params.r,
                 self.estore.eparams.bond_params.lc0,
