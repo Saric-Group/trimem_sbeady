@@ -169,6 +169,23 @@ real area_penalty_nsr(const EnergyParams& params,
     return params.kappa_a * d * d;
 }
 
+//! MMB energy contributions
+real area_penalty_nsr_mmb(const EnergyParams& params,
+                  const VertexPropertiesNSR& props,
+                  const VertexPropertiesNSR& ref_props)
+{
+    return params.kappa_a * props.area;
+}
+
+// MMB CHANGE AREA TO MINIMIZATION CONTRIBUTION
+Point area_penalty_grad_nsr_mmb(const EnergyParams& params,
+                        const VertexPropertiesNSR& props,
+                        const VertexPropertiesNSR& ref_props,
+                        const Point& d_area)
+{
+    return params.kappa_a * d_area;
+}
+
 Point area_penalty_grad_nsr(const EnergyParams& params,
                         const VertexPropertiesNSR& props,
                         const VertexPropertiesNSR& ref_props,
@@ -242,15 +259,22 @@ Point helfrich_energy_grad_nsr(const EnergyParams& params,
 }
 
 
-
-
-
 real trimem_energy_nsr(const EnergyParams& params,
                    const VertexPropertiesNSR& props,
                    const VertexPropertiesNSR& ref_props)
 {
     real energy = 0.0;
-    energy += area_penalty_nsr(params, props, ref_props);
+
+    // MMB CHANGED
+    if(params.area_frac<0){
+        // energy contribution from area is sigma * area
+        energy += area_penalty_nsr_mmb(params, props, ref_props);
+    }
+    else{
+        // energy contribution from area is sigma * (area-area0)^2
+        energy += area_penalty_nsr(params, props, ref_props);
+    }
+
     //MMB CHANGED
     if(ref_props.volume!=0){
         energy += volume_penalty_nsr(params, props, ref_props);
@@ -271,7 +295,16 @@ Point trimem_gradient_nsr(const EnergyParams& params,
 
     Point grad(0.0);
 
-    grad += area_penalty_grad_nsr(params, props, ref_props, gprops.area);
+    //MMB CHANGE FOR TWO DIFFERENT VERSIONS OF THE AREA
+    if (params.area_frac<0){
+        // energy contribution from area is sigma * area
+        grad += area_penalty_grad_nsr_mmb(params, props, ref_props, gprops.area);
+    }
+    else{
+        // energy contribution from area is sigma * (area-area0)^2
+        grad += area_penalty_grad_nsr(params, props, ref_props, gprops.area);
+    }
+
     // MMB CHANGED
     if(ref_props.volume!=0){
     grad += volume_penalty_grad_nsr(params, props, ref_props,  gprops.volume);
