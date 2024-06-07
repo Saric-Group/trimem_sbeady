@@ -307,7 +307,6 @@ class TriLmp():
                  volume_frac = 1.0,          # target volume
                  curvature_frac = 1.0,       # target curvature
                  print_bending_energy=True,  # might increase simulation run - think of putting it as false
-
                  # PROGRAM PARAMETERS
                  num_steps=10,                        # number of overall simulation steps (for trilmp.run() but overitten by trilmp.run(N))
                  reinitialize_every=10000,            # NOT USED - TODO

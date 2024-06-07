@@ -66,7 +66,8 @@ VertexProperties EnergyManager::interpolate_reference_properties() const
 
     // MMB CHANGE
     if (params.area_frac<0){
-        ref_props.area = initial_props.area;
+        i_af = 1.0 - params.area_frac*(-1);
+        ref_props.area      = ( 1.0 - lam * i_af ) * initial_props.area;
     }
 
     return ref_props;
@@ -224,8 +225,10 @@ VertexPropertiesNSR EnergyManagerNSR::interpolate_reference_properties() const
     ref_props.volume    = ( 1.0 - lam * i_vf ) * initial_props.volume;
     ref_props.curvature = ( 1.0 - lam * i_cf ) * initial_props.curvature;
 
+    // MMB CHANGED
     if(params.area_frac<0){
-        ref_props.area = initial_props.area;
+        i_af = 1.0 - params.area_frac*(-1);
+        ref_props.area      = ( 1.0 - lam * i_af ) * initial_props.area;
     }
     return ref_props;
 }
