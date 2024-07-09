@@ -367,10 +367,10 @@ class TriLmp():
                  # (must be initialized in init because affects input file)
                  n_beads=0,                     # number of nanoparticles
                  n_bead_types=0,                # number of nanoparticle types
-                 bead_pos=np.zeros((0,0)),      # positioning of the beads
-                 bead_v  = np.zeros((0,0)),
+                 bead_pos=[],      # positioning of the beads
+                 bead_v  =None,
                  bead_sizes=0.0,                # bead sizes
-                 bead_types=[],                 # bead types
+                 bead_types=[2],                 # bead types
                  n_bond_types = 1,
 
                  # EXTENSIONS MMB: ELASTIC MEMBRANE/S-LAYER
@@ -613,6 +613,9 @@ class TriLmp():
         ########################################################################
         #                           BEADS/NANOPARTICLES                        #
         ########################################################################
+
+        if len(bead_pos)>0:
+            n_beads = len(bead_pos)
 
         self.beads=Beads(n_beads,
                          n_bead_types,
@@ -1478,7 +1481,7 @@ class TriLmp():
             check_outofrange_freq = -1, check_outofrange_cutoff = -1, fix_symbionts_near = True, 
             postequilibration_lammps_commands = None, seed = 123, current_step = 0,
             step_dependent_protocol = False, step_protocol_commands = None, step_protocol_frequency = 0,
-            steps_in_protocol = 0
+            steps_in_protocol = 0, evaluate_configuration = False
         ):
 
         """
@@ -1544,6 +1547,13 @@ class TriLmp():
         if step_dependent_protocol:
             applied_protocol = 0
 
+        # we just want to evaluate a configuration and exit the run
+        if evaluate_configuration:
+            # do not integrate equations of motion, just evaluate
+            self.lmp.command(f'run 0')
+            # exit - do not continue running
+            return
+        
         # run simulation for dictated number
         # of MD steps
         while self.MDsteps<N:
