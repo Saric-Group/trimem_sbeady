@@ -807,13 +807,14 @@ class TriLmp():
                 for i in range(self.n_vertices):
                     f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
 
+                # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
                 if self.beads.n_beads:
                     if self.beads.n_bead_types>1:
                         for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
+                            f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
                     else:
                         for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} 2 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
+                            f.write(f'{self.n_vertices+1+i} 2 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
 
             # [COORDINATES] EXTENSION: SIMULATION WITH AN SLAYER
             elif self.slayer:
@@ -853,6 +854,16 @@ class TriLmp():
                         for i in range(self.beads.n_beads):
                             f.write(f'{self.n_vertices+1+i} 3 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
 
+            # [VELOCITIES]
+            f.write(f'Velocities \n\n')
+            # membrane particles are type 1
+            for i in range(self.n_vertices):
+                f.write(f'{i + 1} 0.0 0.0 0.0 \n')
+
+            # bead velocities
+            if self.beads.n_beads:
+                for i in range(self.beads.n_beads):
+                    f.write(f'{self.n_vertices+1+i} {self.beads.velocities[i, 0]} {self.beads.velocities[i, 1]} {self.beads.velocities[i, 2]}\n')
 
             # [BONDS]
             if self.slayer == False:
@@ -1009,17 +1020,21 @@ class TriLmp():
         # LAMMPS ...............................................................
         # VELOCITIES
         # LAMMPS ...............................................................
-
+        
+        
         # velocity settings
         self.atom_props = f"""
                         velocity {group_particle_type[0]} create {self.algo_params.initial_temperature} 1298371 mom yes dist gaussian
                         """
-
+        """
+        # MMB NOTE: Commenting out because we are passing velocities
+        # in the sim_setup file
         # initialize random velocities if thermal velocities is chosen or set to 0
         if self.algo_params.thermal_velocities:
             self.lmp.commands_string(self.atom_props)
         else:
             self.lmp.command('velocity all zero linear')
+        """
 
         # setting or reinitializing mesh velocities (important for pickle)
         if np.any(self.mesh_velocity):
@@ -1448,7 +1463,7 @@ class TriLmp():
         self.flip_step()
         self.timer.timearray_new[1] += (time.time() - t_fix)
 
-    def raise_errors_run(self, integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near):
+    def raise_errors_run(self, integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near, evaluate_inside_membrane, factor_inside_membrane):
 
         """
         Use function to raise errors and prevent compatibility issues
@@ -1474,6 +1489,10 @@ class TriLmp():
             print("TRILMP ERROR: Number of equilibration rounds not a multiple of traj_steps. Post equilibration commands will never be read.")
             sys.exit(1)
 
+        if(evaluate_inside_membrane) and (factor_inside_membrane == 0):
+            print("TRILMP ERROR: You want to evaluate inside the membrane but you have provided a factor of 0.")
+            sys.exit(1)
+
         print("No errors to report for run. Simulation begins.")
 
     def run(
@@ -1481,7 +1500,8 @@ class TriLmp():
             check_outofrange_freq = -1, check_outofrange_cutoff = -1, fix_symbionts_near = True, 
             postequilibration_lammps_commands = None, seed = 123, current_step = 0,
             step_dependent_protocol = False, step_protocol_commands = None, step_protocol_frequency = 0,
-            steps_in_protocol = 0, evaluate_configuration = False
+            steps_in_protocol = 0, evaluate_configuration = False, evaluate_inside_membrane = False,
+            factor_inside_membrane=0
         ):
 
         """
@@ -1520,7 +1540,7 @@ class TriLmp():
         # -------------------------------------------------
         
         # check whether there is any initialization error
-        self.raise_errors_run(integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near)
+        self.raise_errors_run(integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near, evaluate_inside_membrane, factor_inside_membrane)
 
         # determine length simulation
         if N==0:
@@ -1680,7 +1700,7 @@ class TriLmp():
                     print("These are your current fixes: ")
                     print(self.L.fixes)
 
-            # protocols that have to be added after equilibration
+            # protocols that rely on LAMMPS commands which have to be added after equilibration
             if (self.equilibrated) and (step_dependent_protocol):
                 # if it is the frequency at which we want to apply the protocol
                 if (self.MDsteps % step_protocol_frequency == 0) and self.MDsteps!= oldsteps:
@@ -1692,7 +1712,27 @@ class TriLmp():
                         applied_protocol+=1 
 
                 oldsteps = self.MDsteps
-                    
+
+            # evaluation of inside of membrane and application of corresponding protocol
+            if evaluate_inside_membrane:
+                
+                pos_alloc=self.lmp.numpy.extract_atom("x")
+                membrane = pos_alloc[:self.n_vertices]
+                xcom = np.mean(membrane[:, 0])
+                ycom = np.mean(membrane[:, 1])
+                zcom = np.mean(membrane[:, 2])
+
+                membrane[:, 0] -= xcom
+                membrane[:, 1] -= ycom
+                membrane[:, 2] -= zcom
+
+                compressed_membrane = membrane*factor_inside_membrane
+                compressed_membrane[:, 0] += xcom
+                compressed_membrane[:, 1] += ycom
+                compressed_membrane[:, 2] += zcom
+
+                pos_alloc[self.n_vertices:2*self.n_vertices] = compressed_membrane
+                
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
     ############################################################################
