@@ -454,6 +454,8 @@ class TriLmp():
 
         # extract number of membrane vertices in simulation
         self.n_vertices=self.mesh.x.shape[0]
+        # extract the number of membrane faces in simulation
+        self.n_faces   = self.mesh.f.shape[0]
 
         ########################################################################
         #                       MESH BONDS/TETHERS                             #
@@ -849,10 +851,10 @@ class TriLmp():
                 if self.beads.n_beads:
                     if self.beads.n_bead_types>1:
                         for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
+                            f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
                     else:
                         for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} 3 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 1 1.0\n')
+                            f.write(f'{self.n_vertices+1+i} 3 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
 
             # [VELOCITIES]
             f.write(f'Velocities \n\n')
@@ -862,9 +864,12 @@ class TriLmp():
 
             # bead velocities
             if self.beads.n_beads:
-                for i in range(self.beads.n_beads):
-                    f.write(f'{self.n_vertices+1+i} {self.beads.velocities[i, 0]} {self.beads.velocities[i, 1]} {self.beads.velocities[i, 2]}\n')
-
+                if np.any(self.beads.velocities):
+                    for i in range(self.beads.n_beads):
+                        f.write(f'{self.n_vertices+1+i} {self.beads.velocities[i, 0]} {self.beads.velocities[i, 1]} {self.beads.velocities[i, 2]}\n')
+                else:
+                    for i in range(self.beads.n_beads):
+                        f.write(f'{self.n_vertices+1+i} {0} {0} {0}\n')
             # [BONDS]
             if self.slayer == False:
                 f.write(f'Bonds # zero special\n\n')
@@ -1246,33 +1251,36 @@ class TriLmp():
     # the actual flip step
     def flip_step(self):
         
-        if self.debug_mode:
-            # time the flipping
-            start = time.time()
+        # only do a flip step if the ratio is non-zero
+        if self.algo_params.flip_ratio!=0:
 
-        # make one step
-        flip_ids=self._flips()
+            if self.debug_mode:
+                # time the flipping
+                start = time.time()
 
-        if self.debug_mode:
-            time_flips_trimem = time.time()
-        
-        self.mesh.f[:]=self.mesh.f
-        self.lmp_flip(flip_ids)
+            # make one step
+            flip_ids=self._flips()
 
-        if self.debug_mode:
-            time_flips_lammps = time.time()
+            if self.debug_mode:
+                time_flips_trimem = time.time()
+            
+            self.mesh.f[:]=self.mesh.f
+            self.lmp_flip(flip_ids)
 
-        self.f_acc += flip_ids[-1][0]
-        self.f_num += flip_ids[-1][1]
-        self.f_att += flip_ids[-1][2]
-        self.f_i += 1
-        self.counter["flip"] += 1
+            if self.debug_mode:
+                time_flips_lammps = time.time()
 
-        if self.debug_mode:
-            end = time.time()
-            ff = open("TriLMP_optimization.dat", "a+")
-            ff.writelines(f"MC {end-start} {time_flips_trimem - start} {time_flips_lammps - start} {len(flip_ids)}\n")
-            ff.close()
+            self.f_acc += flip_ids[-1][0]
+            self.f_num += flip_ids[-1][1]
+            self.f_att += flip_ids[-1][2]
+            self.f_i += 1
+            self.counter["flip"] += 1
+
+            if self.debug_mode:
+                end = time.time()
+                ff = open("TriLMP_optimization.dat", "a+")
+                ff.writelines(f"MC {end-start} {time_flips_trimem - start} {time_flips_lammps - start} {len(flip_ids)}\n")
+                ff.close()
 
     ############################################################################
     #             *SELF FUNCTIONS*: HYBRID MONTE CARLO (MC + MD) SECTION       #
@@ -1390,6 +1398,7 @@ class TriLmp():
                 start = time.time()
 
             self.lmp.command(f'run {self.algo_params.traj_steps}')
+
             self.m_acc += 1
             self.m_i += 1
             self.counter["move"] += 1
@@ -1460,10 +1469,11 @@ class TriLmp():
         self.MDsteps +=self.traj_steps
         self.timer.timearray_new[0] += (time.time() - t_fix)
         t_fix = time.time()
+        
         self.flip_step()
         self.timer.timearray_new[1] += (time.time() - t_fix)
 
-    def raise_errors_run(self, integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near, evaluate_inside_membrane, factor_inside_membrane):
+    def raise_errors_run(self, integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near, evaluate_inside_membrane, factor_inside_membrane, naive_compression, desired_interlayer_distance, ghost_membrane_consumes):
 
         """
         Use function to raise errors and prevent compatibility issues
@@ -1493,6 +1503,14 @@ class TriLmp():
             print("TRILMP ERROR: You want to evaluate inside the membrane but you have provided a factor of 0.")
             sys.exit(1)
 
+        if(not naive_compression) and (desired_interlayer_distance == 0):
+            print("TRILMP ERROR: Desired interlayer distance for complex compression cannot be zero.")
+            sys.exit(1)
+
+        if(ghost_membrane_consumes) and (not evaluate_inside_membrane):
+            print("TRILMP ERROR: You want the ghost membrane to consume but you are not setting up the evaluation inside the membrane.")
+            sys.exit(1)
+
         print("No errors to report for run. Simulation begins.")
 
     def run(
@@ -1501,7 +1519,10 @@ class TriLmp():
             postequilibration_lammps_commands = None, seed = 123, current_step = 0,
             step_dependent_protocol = False, step_protocol_commands = None, step_protocol_frequency = 0,
             steps_in_protocol = 0, evaluate_configuration = False, evaluate_inside_membrane = False,
-            factor_inside_membrane=0
+            factor_inside_membrane=0, naive_compression = True, desired_interlayer_distance=0, 
+            gcmc_by_hand=False, desired_particles_source=0, pure_sink=False, desired_particles_sink=0,
+            ghost_membrane_consumes = False, cutoff_consumption = 0, move_membrane=True, force_field_normals = False,
+            A_force =0 , B_force =0,
         ):
 
         """
@@ -1519,6 +1540,11 @@ class TriLmp():
 
         - fix_symbionts_near : place symbionts within interaction range of membrane
         """
+
+        self.move_membrane = move_membrane
+        self.force_field_normals = force_field_normals
+        self.A_force = A_force
+        self.B_force = B_force
 
         # set the numpy seed (MD + MC stepping)
         np.random.seed(seed=seed)
@@ -1540,7 +1566,7 @@ class TriLmp():
         # -------------------------------------------------
         
         # check whether there is any initialization error
-        self.raise_errors_run(integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near, evaluate_inside_membrane, factor_inside_membrane)
+        self.raise_errors_run(integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near, evaluate_inside_membrane, factor_inside_membrane, naive_compression, desired_interlayer_distance, ghost_membrane_consumes)
 
         # determine length simulation
         if N==0:
@@ -1716,23 +1742,69 @@ class TriLmp():
             # evaluation of inside of membrane and application of corresponding protocol
             if evaluate_inside_membrane:
                 
+                # extract the particle coordinates (more to pass them later on)
                 pos_alloc=self.lmp.numpy.extract_atom("x")
-                membrane = pos_alloc[:self.n_vertices]
-                xcom = np.mean(membrane[:, 0])
-                ycom = np.mean(membrane[:, 1])
-                zcom = np.mean(membrane[:, 2])
 
-                membrane[:, 0] -= xcom
-                membrane[:, 1] -= ycom
-                membrane[:, 2] -= zcom
+                new_mesh = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f)
+                baricenters = new_mesh.triangles_center
+                face_normals = new_mesh.face_normals
+                compressed_membrane = baricenters - desired_interlayer_distance*face_normals
 
-                compressed_membrane = membrane*factor_inside_membrane
-                compressed_membrane[:, 0] += xcom
-                compressed_membrane[:, 1] += ycom
-                compressed_membrane[:, 2] += zcom
+                # inform lammps of the coordinates again
+                pos_alloc[self.n_vertices:self.n_vertices+self.n_faces] = compressed_membrane
 
-                pos_alloc[self.n_vertices:2*self.n_vertices] = compressed_membrane
+                if ghost_membrane_consumes:
+                    self.lmp.command(f'delete_atoms overlap {cutoff_consumption} metabolites inside')
+
+            # do gcmc by hand rather than using fix gcmc
+            if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and gcmc_by_hand:
                 
+                to_add = 0
+                to_delete = 0
+                
+                # --------------------
+                # SOURCE
+                # --------------------
+
+                # count how many particles are there in the source
+                particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+
+                # add needed particles in source (assuming 3 particle types)
+                to_add = desired_particles_source - particles_source[2]
+
+                # if you need to add particles because there are not enough
+                if to_add>0:
+                    self.lmp.command(f'create_atoms 3 random {int(to_add)} {i+1} SOURCE')
+                if to_add<0:
+                    self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3}')
+
+                # --------------------
+                # SINK
+                # --------------------
+
+                # count how many particles there are in the sink
+                if not pure_sink:
+                    particles_sink = self.lmp.numpy.extract_compute("countsink", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+               
+                # if you want to regulate the number of particles in the sink
+                if not pure_sink:
+                    to_delete = desired_particles_sink - particles_sink[2]
+
+                # if you need to delete particles because there are too many
+                if to_delete<0:
+                    self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2}')
+
+                # if you need to add particles because there are too few in the sink
+                if to_delete>0:
+                    self.lmp.command(f'create_atoms 3 random {int(to_delete)} {i+4} SINK')
+
+                # delete particles in sink by default
+                if pure_sink:
+                    self.lmp.command(f'delete_atoms region SINK')
+
+                # reevaluate group type 3 for correct integration
+                self.lmp.command(f'group metabolites type 3')
+
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
     ############################################################################
@@ -1786,10 +1858,26 @@ class TriLmp():
         !!!!!!! This function is used as callback to TRIMEM FROM LAMMPS !!!!!
         This is where the forces on the membrane beads, computed by TriMEM
         are extracted, and LAMMPS uses them to act on the membrane beads.
+        We make it be equal, not add?
         """
         #print(tag)
         #tag_clear=[x-1 for x in tag if x <= self.n_vertices]
-        f[:self.n_vertices]=-self.estore.gradient(self.mesh.trimesh)
+        if self.move_membrane:
+            f[:self.n_vertices]=-self.estore.gradient(self.mesh.trimesh)
+
+        # include a force field that acts normal to the surface of the membrane
+        if self.force_field_normals:
+            
+            new_mesh = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f)
+            face_normals = new_mesh.face_normals
+            mean_vertex_normals = trimesh.geometry.mean_vertex_normals(len(self.mesh.x), self.mesh.f, face_normals)
+
+            # force field in the direction of x
+            magnitude_force = self.A_force*self.mesh.x[:, 0] + self.B_force
+            magnitude_force_newaxis = magnitude_force[:, np.newaxis]
+
+            forces_to_add = mean_vertex_normals*magnitude_force_newaxis
+            f[:self.n_vertices] += forces_to_add
 
         # if needed for flat membrane, correct
         if np.any(self.vertices_at_edge):
