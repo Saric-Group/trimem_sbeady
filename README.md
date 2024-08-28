@@ -1,9 +1,7 @@
-# TriLmp
+# TriLMP
 
-**TriLmp** is a modified version of the **Trimem** python package for the Monte Carlo simulation of lipid
-membranes according to the Helfrich theory [^Helfrich1973]. It allows for the direct use for MD simulations
-in connection with LAMMPS via the python interface of the latter. Hereby the calculation of the surface repulsion
-is dealt with by LAMMPS instead of Trimem. For details on how to use the package, please refer to the HowTo_TriLMP.md file.
+**TriLMP** is a modified version of the [**TriMEM**](https://github.com/bio-phys/trimem) python package, which performs (Hybrid) Monte Carlo simulations of lipid
+membranes according to the Helfrich theory [^Helfrich1973]. TriLMP couples TriMEM to [LAMMPS](https://github.com/lammps/lammps) via the python interface of the latter. Within TriLMP, the Dynamically Triangulated network (DTN) is a LAMMPS molecule made of particles (network vertices) that are connected through bonds (network edges). Throughout the simulation, TriLMP uses TriMEM to compute the Helfrich Hamiltonian as well as to obtain the list of vertices that have to be updated to ensure fluidity. At each MD step, TriMEM provides the force acting on each vertex in the network to LAMMPS through TriLMP so that vertices in the network move according to LAMMPS' time-integrators. At a prescribed frequency (see docs), TriLMP informs LAMMPS to update the network connectivity by removing and creating new bonds between particles in the molecule. Additionally, the calculation of the surface repulsion, which prevents the network from self-intersecting, is dealt with by LAMMPS instead of TriMEM. For details on how to use the package, please refer to the HowTo_TriLMP.md file.
 
 [^Helfrich1973]: Helfrich, W. (1973) Elastic properties of lipid bilayers:
   Theory and possible experiments. Zeitschrift für Naturforschung C,
