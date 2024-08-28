@@ -14,7 +14,8 @@ TriLMP couples TriMEM to [LAMMPS](https://github.com/lammps/lammps) via the pyth
 
 TriLMP has been successfully installed and tested in:
 - Linux
-- Mac (?) Pending
+
+For Mac OS, there are problems with CMake finding OpenMP. This is ongoing work.
 
 We suggest installing TriLmp in a conda environment and then install trimem/trilmp as a editable install.
 This allows you to alter trilmp functionality by directly tinkering with the src/trimem/trilmp.py file if needed.
