@@ -1,7 +1,10 @@
 # TriLMP
 
-**TriLMP** is a modified version of the [**TriMEM**](https://github.com/bio-phys/trimem) python package, which performs (Hybrid) Monte Carlo simulations of lipid
-membranes according to the Helfrich theory [^Helfrich1973]. TriLMP couples TriMEM to [LAMMPS](https://github.com/lammps/lammps) via the python interface of the latter. Within TriLMP, the Dynamically Triangulated network (DTN) is a LAMMPS molecule made of particles (network vertices) that are connected through bonds (network edges). Throughout the simulation, TriLMP uses TriMEM to compute the Helfrich Hamiltonian as well as to obtain the list of vertices that have to be updated to ensure fluidity. At each MD step, TriMEM provides the force acting on each vertex in the network to LAMMPS through TriLMP so that vertices in the network move according to LAMMPS' time-integrators. At a prescribed frequency (see docs), TriLMP informs LAMMPS to update the network connectivity by removing and creating new bonds between particles in the molecule. Additionally, the calculation of the surface repulsion, which prevents the network from self-intersecting, is dealt with by LAMMPS instead of TriMEM. For details on how to use the package, please refer to the HowTo_TriLMP.md file.
+**TriLMP** is a modified version of the [**TriMEM**](https://github.com/bio-phys/trimem) python package. It performs Hybrid Monte Carlo (HMC) simulations of lipid
+membranes according to the Helfrich theory[^Helfrich1973]. Please refer to Siggel et al.[^Siggel2022] for details on the hamiltonian simulated.
+
+## Basic introduction
+TriLMP couples TriMEM to [LAMMPS](https://github.com/lammps/lammps) via the python interface of the latter. Within TriLMP, the Dynamically Triangulated network (DTN) is a LAMMPS molecule made of particles (network vertices) that are connected through bonds (network edges). Throughout the simulation, TriLMP uses TriMEM to compute the Helfrich Hamiltonian as well as to obtain the list of vertices that have to be updated to ensure membrane fluidity. At each MD simulation step, TriMEM provides the force acting on each vertex in the network to LAMMPS so that vertices in the network move according to LAMMPS' time-integrators. At a prescribed frequency (see TriLMP docs), TriLMP informs LAMMPS to update the network connectivity by removing and creating new bonds between particles in the molecule. Additionally, the calculation of the surface repulsion, which prevents the network from self-intersecting, is dealt with by LAMMPS instead of TriMEM. For further details on how to use the package, please refer to the HowTo_TriLMP.md file.
 
 [^Helfrich1973]: Helfrich, W. (1973) Elastic properties of lipid bilayers:
   Theory and possible experiments. Zeitschrift für Naturforschung C,
@@ -9,11 +12,14 @@ membranes according to the Helfrich theory [^Helfrich1973]. TriLMP couples TriME
 
 ## Installation
 
-We suggest installing TriLmp in a conda environment and then install trimem/trilmp as a editable install.
-This allows you to alter trilmp functionality by directly tinkering with the src/trimem/trilmp.py file.
-As trilmp is reliant on a lot of LAMMPS command-string which are not all parametrized via the TriLmp object,
-an editable install should be a bit more flexible.
+TriLMP has been successfully installed and tested in:
+- Linux
+- Mac (?) Pending
 
+We suggest installing TriLmp in a conda environment and then install trimem/trilmp as a editable install.
+This allows you to alter trilmp functionality by directly tinkering with the src/trimem/trilmp.py file if needed.
+This can come in handy in case you need to define or initialize a simulation set-up that is not covered by the current version of TriLMP.
+The code is designed such that additional LAMMPS commands can always be passed as command strings once the ```trilmp``` object has been created.
 
 ### Conda Environment
 
@@ -24,15 +30,16 @@ conda create -n Trienv
 conda install -n Trienv scikit-build libgcc pybind11
 conda activate Trienv
 ```
+
 Make sure the evironment is activated throughout the rest of the setup!
 
-### Trimem/Trilmp
-TriLmp can be installed using pip:
-Note that this folder will be the actual location of the modules with an editable install.
-I.e. if you change something in the python code here, effects will be immediate.
-In case you want to change something on the c++ side: run "python3 setup.py build" to compile and copy 
+### TriMEM/TriLMP
+TriLMP can be installed using pip.
+Note that this folder will be the actual location of the modules with an editable install, i.e., if you change something in the python code here, effects will be immediate.
+In case you want to change something on the c++ side of the code, make sure to run "python3 setup.py build" in order to to compile and copy 
 the libaries to the src/trimem folder as described below.
 
+Clone and install TriLMP by running:
 ```bash
  git clone --recurse-submodules https://github.com/Saric-Group/trimem_sbeady.git
  
@@ -41,15 +48,13 @@ the libaries to the src/trimem folder as described below.
  pip install -e .
 ```
 
-In case they are not build during install one can compile the shared libraries
-using
+In case they are not built during install one can compile the shared libraries using
 ```bash
 python3 setup.py build
 ```
 
 Finally some shared libraries have to be copied manually from the _skbuild folder. 
-The names depends on system and python verison!
--> all the .so files should be placed in the src/trimem folder
+The names you see below depend on system and python version! Note that all the .so files should be placed in the src/trimem folder.
 
 ```bash
 cp _skbuild/linux-x86_64-3.11/cmake-build/core.cpython-311-x86_64-linux-gnu.so src/trimem/.
@@ -58,20 +63,17 @@ cp _skbuild/linux-x86_64-3.11/cmake-build/Build/lib/* src/trimem/.
 ```
 
 ### LAMMPS
-LAMMPs has to be installed using python shared libraries and some packages (can be extended).
-If you already have lammps you might just have to reinstall it. In any case you will have to 
-perform the python install using your Trienv environment.
+LAMMPS has to be installed using python shared libraries and some specific packages.
+If you already have LAMMPS you might have to reinstall it. In any case you will have to 
+perform the python install using your Trienv environment as we detail below.
 
-To get lammps from git ( go back to the directory where you want to have your install folder)
+Go back to the directory where you want to have your install folder and get lammps from git by running
 
 ```bash
 git clone -b stable https://github.com/lammps/lammps.git lammps
 ```
-!!!! IMPORTANT !!!!
-Before proceeding further you have to place some files in the lammps/src folder to enable the nonreciprocal and nonreciprocal/omp pair_styles.
-In the folder nonrec in the trimem_sbeady repositry you find pair_nonreciprocal.cpp/.h and pair_nonreciprocal_omp.cpp/.h .
-The two files pair_nonreciprocal have to be placed in the lammps/src folder and the two pair_nonreciprocal_omp files in the lammps/src/OPENMP folder.
-Now we can start installing the LAMMPS. First go to the lammps directory and create the build folder.
+
+We can now start installing LAMMPS. Go first to the ```lammps``` directory and create the ```build``` folder.
 ```bash
 cd lammps                
 mkdir build
@@ -90,7 +92,7 @@ which should print something like
 ```bash
 /nfs/scistore15/saricgrp/Your_folder/.conda/envs/Trienv/bin/python3
 ```
-and will be referred to as "python_path" in the next bash command. Not that this enables PyLammps this specific conda environment only! 
+and will be referred to as "python_path" in the next bash command. Note that this enables PyLammps in this specific conda environment only! 
 
 Now we can set up the makefiles and build LAMMPS. The command line you see below is a suggestion for the LAMMPS packages you may want to compile for tests (these are suggested here because they have proved useful in the past in the development of works involving TriLMP).
 
@@ -107,11 +109,11 @@ Roughly, this is what some of these packages can be useful for:
 - ```MC``` $\rightarrow$ ```fix gcmc```, ```fix bond/create```
 - ```REACTION``` $\rightarrow$ ```fix bond/react```
 
-Please feel free to add or delete as many LAMMPS packages as you want. You can always come back and recompile LAMMPS with additional packages in the future if you need it.
+If you are missing specific packages or you want to extend your installation, you can always come back and recompile LAMMPS with additional packages.
 
-If you try the above compilation and it is not working, try loading the openmpi module by typing ```module load openmpi``` in the cluster. 
+For HPC clusters: If you try the above compilation and it is not working, try loading the openmpi module first by typing ```module load openmpi``` in the cluster.
 
-Finally to make LAMMPS accessible for python, i.e. making and copying the shared libaries.
+Finally to make LAMMPS accessible for python, i.e. making and copying the shared libaries, use
 
 ```bash
 make install-python
@@ -120,13 +122,14 @@ make install-python
 ### Dependencies
 
 
-(Rest is CopyPaste from Trimem)
-Trimem builds upon the generic mesh data structure
+This information has been copied from TriMEM's documentation. 
+
+TriMEM builds upon the generic mesh data structure
 [OpenMesh](https://www.graphics.rwth-aachen.de/software/openmesh/), which
 is included as a submodule that is pulled in upon `git clone` via the
 `--recurse-submodules` flag.
 
-For the efficient utilization of shared-memory parallelism, trimem makes
+For the efficient utilization of shared-memory parallelism, triMEM makes
 use of the [OpenMP](https://www.openmp.org/) application programming model
 (`>= v4.5`) and modern `C++`. It thus requires relatively up-to-date
 compilers (supporting at least `C++17`).
@@ -150,7 +153,7 @@ Documentation and tests further require:
 
 ### Development installation
 
-Unit-tests can be run with
+Unit-tests for TriMEM can be run with
 
 ```bash
 pip install trimem/[tests]
@@ -166,12 +169,12 @@ cd doc; make html
 
 ## Usage
 
-For an introduction to the usage of trimem please refer to the
+For an introduction to the usage of TriMEM please refer to the
 [documentation](https://trimem.readthedocs.io/).
 
 ## Citation
 
-If you use trimem for your scientific work, please consider the citation of
+If you use triMEM for your scientific work, please consider the citation of
 Siggel, M. et al[^Siggel2022].
 
 [^Siggel2022]: Siggel, M. et al. (2022) TriMem: A Parallelized Hybrid Monte
