@@ -181,5 +181,3 @@ Siggel, M. et al[^Siggel2022].
   Carlo Software for Efficient Simulations of Lipid Membranes.
   J. Chem. Phys. (in press) (2022); https://doi.org/10.1063/5.0101118
 
-## References
-
