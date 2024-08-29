@@ -13,8 +13,6 @@
 namespace trimem {
 
 
-
-
 EnergyManager::EnergyManager(const TriMesh& mesh,const EnergyParams& energy_params) :
     params(energy_params)
 {
@@ -65,6 +63,12 @@ VertexProperties EnergyManager::interpolate_reference_properties() const
     ref_props.area      = ( 1.0 - lam * i_af ) * initial_props.area;
     ref_props.volume    = ( 1.0 - lam * i_vf ) * initial_props.volume;
     ref_props.curvature = ( 1.0 - lam * i_cf ) * initial_props.curvature;
+
+    // MMB CHANGE
+    if (params.area_frac<0){
+        i_af = 1.0 - params.area_frac*(-1);
+        ref_props.area      = ( 1.0 - lam * i_af ) * initial_props.area;
+    }
 
     return ref_props;
 }
@@ -221,6 +225,11 @@ VertexPropertiesNSR EnergyManagerNSR::interpolate_reference_properties() const
     ref_props.volume    = ( 1.0 - lam * i_vf ) * initial_props.volume;
     ref_props.curvature = ( 1.0 - lam * i_cf ) * initial_props.curvature;
 
+    // MMB CHANGED
+    if(params.area_frac<0){
+        i_af = 1.0 - params.area_frac*(-1);
+        ref_props.area      = ( 1.0 - lam * i_af ) * initial_props.area;
+    }
     return ref_props;
 }
 
@@ -275,6 +284,7 @@ std::vector<Point> EnergyManagerNSR::gradient(const TriMesh& mesh)
 
     EvaluatePropertiesNSR eval_kernel(params, mesh, *bonds, vprops);
     parallel_for(n, eval_kernel);
+
 
     ReducePropertiesNSR reduce_kernel(vprops);
     parallel_reduction(n, reduce_kernel, props);

@@ -18,19 +18,26 @@ git clone --recurse-submodules [repo]
 git submodule update
 ```
 
-`cd trilmp_sbeady`
+build lammps with openmp support, linked to python
+
+`./lmp_build.sh`  (osx only, adapt as needed)
+
+`./lmp_clean.sh` uninstalls it.
+
+build shared libraries
+
+
+`python setup.py build`
+
+copy shared libraries to src 
+`./copy_libs.sh`
 
 install module in editable mode
 `pip install -e .`
 
-build libraries
-`python setup.py build`
+test
+`python -c "from trimem import core"`
 
-copy shared libraries to src 
-`. copy_libs.sh`
+if re-compiling shared libraries, clean previous ones with:
 
-build lammps with openmp support, linked to python, and with nonrec interactions
-`cp -r ./nonrec lammps/src/`
-`lmp_build.sh`  (osx only, adapt as needed)
-
-`lmp_clean.sh` uninstalls it.
+`./clean.sh`

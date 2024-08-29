@@ -94,7 +94,6 @@ public:
     // print status information
     void print_info(const TriMesh& mesh);
 
-
     // energy parameters
     EnergyParams params;
 

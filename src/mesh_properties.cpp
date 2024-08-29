@@ -167,7 +167,7 @@ VertexPropertiesNSR vertex_properties_nsr(const TriMesh& mesh,
     VertexPropertiesNSR p{ 0, 0, 0, 0, 0};
 
     for (auto he : mesh.voh_range(ve))
-    {
+    {   
         if ( not he.is_boundary() )
         {
             // edge curvature
@@ -190,19 +190,18 @@ VertexPropertiesNSR vertex_properties_nsr(const TriMesh& mesh,
     p.curvature /= 2;
     p.tethering /= bonds.valence();
 
-    p.bending    = 2 * p.curvature * p.curvature / p.area;
-
+    //MMB CHANGE
+    if (p.area!=0){
+        p.bending    = 2 * p.curvature * p.curvature / p.area;
+    }
 
     return p;
 }
 
 
 
-
-
 void vertex_properties_grad_nsr(const TriMesh& mesh,
                             const BondPotential& bonds,
-
                             const VertexHandle& ve,
                             const std::vector<VertexPropertiesNSR>& props,
                             std::vector<VertexPropertiesGradientNSR>& d_props)
@@ -218,6 +217,9 @@ void vertex_properties_grad_nsr(const TriMesh& mesh,
     // pre-compute vertex-curvature to vertex-area ratio (needed for bending)
     // for the patch of vertex ve (at pos 0 of this array) and later also at
     // pos 1 and 2 for other vertex-patches.
+
+    // MMB NOTE: THIS IS WHERE THE PROBLEMS FOR THE GRADIENT ARISE
+
     std::array<real, 3> c_to_a;
     auto idx = ve.idx();
     c_to_a[0] = props[idx].curvature / props[idx].area;
@@ -225,7 +227,8 @@ void vertex_properties_grad_nsr(const TriMesh& mesh,
     for (auto he : mesh.voh_range(ve))
     {
         if ( not he.is_boundary() )
-        {
+        {   
+
             auto n_he = mesh.next_halfedge_handle(he);
             auto jdx  = mesh.to_vertex_handle(he).idx();
             auto kdx  = mesh.to_vertex_handle(n_he).idx();
@@ -241,12 +244,14 @@ void vertex_properties_grad_nsr(const TriMesh& mesh,
             real edge_angle  = trimem::dihedral_angle(mesh, he);
             auto d_length    = trimem::edge_length_grad<1>(mesh, he);
             auto d_angle     = trimem::dihedral_angle_grad<1>(mesh, he);
+
             for (int i=0; i<2; i++)
             {
                 auto val = 0.25 * (edge_angle * d_length[0] +
                                    edge_length * d_angle[0]);
                 d_props[idx].curvature += val;
                 d_props[idx].bending   += 4.0 * c_to_a[i] * val;
+
             }
 
             // face area of outgoing he
@@ -273,6 +278,7 @@ void vertex_properties_grad_nsr(const TriMesh& mesh,
             edge_length = trimem::edge_length(mesh, n_he);
             edge_angle  = trimem::dihedral_angle(mesh, n_he);
             d_angle     = trimem::dihedral_angle_grad<4>(mesh, n_he);
+
             for (int i=1; i<3; i++)
             {
                 auto val = 0.25 * edge_length * d_angle[0];
@@ -283,7 +289,6 @@ void vertex_properties_grad_nsr(const TriMesh& mesh,
             // tether bonds
             auto d_bond = bonds.vertex_property_grad(mesh, he)[0];
             d_props[idx].tethering += d_bond;
-
         } // not boundary
     } // outgoing halfedges
 

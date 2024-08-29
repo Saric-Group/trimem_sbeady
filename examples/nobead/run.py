@@ -1,9 +1,10 @@
 
-import trimesh
-from trimem.core import TriMesh
-import numpy as np
 import pickle
 
+import numpy as np
+import trimesh
+
+from trimem.core import TriMesh
 from trimem.mc.trilmp import TriLmp
 
 """
@@ -22,7 +23,7 @@ trilmp=TriLmp(mesh_points=mesh.vertices,  # input mesh
               output_prefix='lj_test_trilmp',         # prefix for output filenames
               checkpoint_every=1000,     # interval of checkpoints (alternating pickles)
               thin=1,                     # write out
-              num_steps=1000,             # number of steps in simulation (overwritten if trilmp.run(N=new_number)
+              num_steps=10,             # number of steps in simulation (overwritten if trilmp.run(N=new_number)
               info=0,                     # output hmc/flip info every ith step
               performance_increment=10,   # output performace stats to prefix_performance.dat file
               energy_increment=1000,      # output energies to energies.dat file
