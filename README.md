@@ -142,11 +142,11 @@ make install-python
 
 ## 5. Testing your installation
 
-Try running the example in ```example/examples_2024``` to check whether you have installed TriLMP correctly. To run it, 
+Try running the examples in ```example/examples_2024``` to check whether you have installed TriLMP correctly. To run them, use
 
 ```
 cd example/examples_2024
-python launch.py
+python launch_nameexample.py
 ```
 
 ### Dependencies
