@@ -140,6 +140,15 @@ Finally to make LAMMPS accessible for python, i.e. making and copying the shared
 make install-python
 ```
 
+## 5. Testing your installation
+
+Try running the example in ```example/examples_2024``` to check whether you have installed TriLMP correctly. To run it, 
+
+```
+cd example/examples_2024
+python launch.py
+```
+
 ### Dependencies
 
 This information has been copied from TriMEM's documentation. 
