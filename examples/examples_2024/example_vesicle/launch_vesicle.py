@@ -132,7 +132,7 @@ trilmp.lmp.command("pair_coeff * * harmonic/cut 0 0")
 # RUN THE SIMULATION
 MDsteps = 100000
 SimTime = MDsteps*dt
-trilmp.run(MDsteps, integrators_defined=True, fix_symbionts_near=False)
+trilmp.run(MDsteps)
 
 print("")
 print("*** End of the simulation ***")
