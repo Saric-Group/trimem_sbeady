@@ -1,4 +1,4 @@
-# TriLMP
+# TriLMP = TriMEM + LAMMPS
 
 **TriLMP** is a modified version of the [**TriMEM**](https://github.com/bio-phys/trimem) python package. It performs Hybrid Monte Carlo (HMC) simulations of lipid
 membranes according to the Helfrich theory[^Helfrich1973]. Please refer to Siggel et al.[^Siggel2022] for details on the specific Hamiltonian simulated, or the [TriMEM documentation](https://trimem.readthedocs.io/en/latest/) further information on the TriMEM package.
