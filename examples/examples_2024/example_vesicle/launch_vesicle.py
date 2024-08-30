@@ -81,9 +81,9 @@ trilmp=TriLmp(initialize=True,                            # use mesh to initiali
             
             info=100,                              # OUTPUT: frequency output in shell
             thin=100,                              # OUTPUT: frequency trajectory output
-            performance_increment=10,               # OUTPUT: output performace stats to prefix_performance.dat file - PRINTED MD+MC FREQUENCY
-            energy_increment=100,                    # OUTPUT: output energies to energies.dat file - PRINTED MD FREQUENCY
-            checkpoint_every=100*10000,              # OUTPUT: interval of checkpoints (alternating pickles) - PRINTED MD+MC FREQUENCY 
+            performance_increment=10,              # OUTPUT: output performace stats to prefix_performance.dat file - PRINTED MD+MC FREQUENCY
+            energy_increment=100,                  # OUTPUT: output energies to energies.dat file - PRINTED MD FREQUENCY
+            checkpoint_every=100*10000,            # OUTPUT: interval of checkpoints (alternating pickles) - PRINTED MD+MC FREQUENCY 
             )
 
 # -------------------------#
