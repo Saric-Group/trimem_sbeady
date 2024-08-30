@@ -130,7 +130,7 @@ trilmp.lmp.command("pair_coeff * * harmonic/cut 0 0")
 # -------------------------#
 
 # RUN THE SIMULATION
-MDsteps = 5000
+MDsteps = 100000
 SimTime = MDsteps*dt
 trilmp.run(MDsteps, integrators_defined=True, fix_symbionts_near=False)
 
