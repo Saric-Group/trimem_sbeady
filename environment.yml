@@ -10,6 +10,7 @@ dependencies:
   
   - numpy
   - scipy
+  - pandas
   - h5py
   - meshio
   - trimesh
