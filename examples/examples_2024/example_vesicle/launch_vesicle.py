@@ -75,7 +75,7 @@ trilmp=TriLmp(initialize=True,                            # use mesh to initiali
             initial_temperature=1.0,                 # MD PART SIMULATION: temperature of the system
             pure_MD=True,                            # MD PART SIMULATION: accept every MD trajectory
             switch_mode="random",                    # MD/MC PART SIMULATION: 'random' or 'alternating' flip-or-move
-            box=(-20, 20, -20, 20, -20, 44.68112162197018),         # MD PART SIMULATION: simulation box properties, periodic
+            box=(-20, 20, -20, 20, -20, 20),         # MD PART SIMULATION: simulation box properties, periodic
 
             equilibration_rounds=100,   # MD PART SIMULATION: HOW LONG DO WE LET THE MEMBRANE EQUILIBRATE
             
