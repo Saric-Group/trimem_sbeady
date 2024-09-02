@@ -3,7 +3,7 @@
 # MMB COMMENT: MUST BE UPDATED!
 
 cff-version: 1.2.0
-title: Tutorials for Membrane Review
+title: TriLMP: Trimem + LAMMPS
 message: >-
   If you use this software, please cite it using the
   metadata from this file.
