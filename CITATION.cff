@@ -1,0 +1,35 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+# MMB COMMENT: MUST BE UPDATED!
+
+cff-version: 1.2.0
+title: Tutorials for Membrane Review
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Maitane
+    family-names: Munoz-Basagoiti
+    email: maitane.munoz-basagoiti@ista.ac.at
+    affiliation: ISTA
+  - given-names: Michael
+    family-names: Wassermair
+    email: email@email.com
+    affiliation: ISTA
+  - given-names: Miguel
+    family-names: Amaral
+    email: miguel.amaral@ista.ac.at
+    affiliation: ISTA
+  - given-names: Andela
+    family-names: Saric
+    email: andela.saric@ista.ac.at
+    affiliation: ISTA
+repository-code: 'https://github.com/Saric-Group/trimem_sbeady'
+abstract: >-
+  All biological cells are defined by a plasma membrane that
+  protects the interior of the cell from the extracellular
+  environment.
+keywords:
+  - simulation
+  - membrane
