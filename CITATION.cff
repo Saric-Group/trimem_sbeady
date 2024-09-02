@@ -3,7 +3,7 @@
 # MMB COMMENT: MUST BE UPDATED!
 
 cff-version: 1.2.0
-title: Tutorials for Membrane Review
+title: TriLMP
 message: >-
   If you use this software, please cite it using the
   metadata from this file.
@@ -13,27 +13,15 @@ authors:
     family-names: Amaral
     email: miguel.amaral@ista.ac.at
     affiliation: ISTA
-  - given-names: Adam
-    family-names: Prada
-    email: adam.prada@ista.ac.at
-    affiliation: ISTA
   - given-names: Maitane
     family-names: Munoz-Basagoiti
     email: maitane.munoz-basagoiti@ista.ac.at
-    affiliation: ISTA
-  - given-names: Felix
-    family-names: Frey
-    email: felix.frey@ista.ac.at
-    affiliation: ISTA
-  - given-names: Billie
-    family-names: Meadowcroft
-    email: billie.meadowcroft@ista.ac.at
     affiliation: ISTA
   - given-names: Andela
     family-names: Saric
     email: andela.saric@ista.ac.at
     affiliation: ISTA
-repository-code: 'https://github.com/Saric-Group/MembraneReviewTutorials'
+repository-code: 'https://github.com/Saric-Group/trimem_sbeady'
 abstract: >-
   All biological cells are defined by a plasma membrane that
   protects the interior of the cell from the extracellular
