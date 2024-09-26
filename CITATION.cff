@@ -9,6 +9,9 @@ message: >-
   metadata from this file.
 type: software
 authors:
+  - given-names: Michael
+    family-names: Wassermair
+    email: michael.wassermair@ista.ac.at
   - given-names: Miguel
     family-names: Amaral
     email: miguel.amaral@ista.ac.at
