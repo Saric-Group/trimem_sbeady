@@ -93,6 +93,7 @@ import trimesh, re, textwrap, warnings, psutil, os, sys, time, pickle, pathlib, 
 from copy import copy
 from ctypes import *
 from .. import core as m
+from scipy.special import erf
 from trimem.core import TriMesh
 from trimem.mc.mesh import Mesh
 from collections import Counter
@@ -101,6 +102,7 @@ from trimem.mc.output import make_output
 from typing import Union as pyUnion # to avoid confusion with ctypes.Union
 from datetime import datetime, timedelta
 from lammps import lammps, PyLammps, LAMMPS_INT, LMP_STYLE_GLOBAL, LMP_VAR_EQUAL, LMP_VAR_ATOM, LMP_TYPE_SCALAR, LMP_TYPE_VECTOR, LMP_TYPE_ARRAY, LMP_SIZE_VECTOR, LMP_SIZE_ROWS, LMP_SIZE_COLS
+from scipy.spatial import KDTree
 
 _sp = u'\U0001f604'
 _nl = '\n'+_sp
@@ -285,8 +287,8 @@ class TriLmp():
                  # TRIANGULATED MEMBRANE BONDS
                  bond_type='Edge',      # 'Edge' or 'Area
                  bond_r=2,              # steepness of potential walls (from Trimem)
-                 lc0=None,              # upper onset ('Edge') default will be set below
-                 lc1=None,              # lower onset ('Edge')
+                 lc0=np.sqrt(3),        # upper onset ('Edge') default will be set below
+                 lc1=1.0,               # lower onset ('Edge')
                  a0=None,               # reference face area ('Area')
 
                  # TRIANGULATED MEMBRANE MECHANICAL PROPERTIES
@@ -398,6 +400,12 @@ class TriLmp():
                  # TEST MODE FOR OPTIMIZATIONS 
                  test_mode = True,
 
+                 # Add angle potentials to the simulation
+                 add_angles = False,
+                 n_angle_types=0,
+                 n_angles=0,
+                 angles_total=0,
+                 angle_triplets=None  # Dictionary with structure {'angle_type':[[A, B, C], [D, E, F]]}
                  ):
 
 
@@ -475,8 +483,8 @@ class TriLmp():
 
         # MMB hardcoded scaling of the edges
         a, l = m.avg_tri_props(self.mesh.trimesh)
-        self.bparams.lc0 = np.sqrt(3) # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
-        self.bparams.lc1 = 1.0        # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
+        self.bparams.lc0 = lc1*np.sqrt(3)  #lc0 #np.sqrt(3) # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
+        self.bparams.lc1 = lc1 #1.0        # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
         self.bparams.a0 = a
 
         ########################################################################
@@ -497,7 +505,7 @@ class TriLmp():
 
         if rep_lc1==None:
             #by default set to average distance used for scaling tether potential
-            self.rparams.lc1 = 1.0 # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
+            self.rparams.lc1 = lc1 #1.0 # MMB: HARDCODED AS IN THE IN-HOUSE MC CODE
         else:
             self.rparams.lc1 = rep_lc1
 
@@ -610,7 +618,7 @@ class TriLmp():
             self.estore = m.EnergyManagerNSR(self.mesh.trimesh, self.eparams, self.init_props)
 
         # save general lengthscale, i.e. membrane bead "size" defined by tether repulsion onset
-        self.l0 = 1.0 # MMB HARDCODED: LENGTH SCALE OF SYSTEM IS ALWAYS SIGMA = 1
+        self.l0 = lc1 #1.0 # MMB HARDCODED: LENGTH SCALE OF SYSTEM IS ALWAYS SIGMA = 1
 
         ########################################################################
         #                           BEADS/NANOPARTICLES                        #
@@ -727,6 +735,13 @@ class TriLmp():
         # define atom_style
         atom_style_text = "hybrid bond charge"
         bond_dihedral_text = f"bond/types {n_bond_types}"
+
+        # if we want to have angles in the system
+        angle_style_text=""
+        if add_angles:
+            atom_style_text = "full" # molecular (we need dihedrals) + charge
+            angle_style_text = f"angle/types {n_angle_types}"
+            angle_style_text += " extra/angle/per/atom 4 "
         # modifications to atom_style if s-layer/elastic membrane exists
         if self.slayer:
             atom_style_text = "full" # molecular (we need dihedrals) + charge
@@ -747,7 +762,7 @@ class TriLmp():
             atom_modify sort 0 0.0
 
             region box block {self.algo_params.box[0]} {self.algo_params.box[1]} {self.algo_params.box[2]} {self.algo_params.box[3]} {self.algo_params.box[4]} {self.algo_params.box[5]}
-            create_box {total_particle_types} box {bond_dihedral_text} extra/bond/per/atom 100 extra/special/per/atom 100
+            create_box {total_particle_types} box {bond_dihedral_text} {angle_style_text} extra/bond/per/atom 100 extra/special/per/atom 100
 
             run_style verlet
 
@@ -792,6 +807,11 @@ class TriLmp():
             f.write(f'{self.edges.shape[0]+n_tethers+self.n_slayer_bonds} bonds\n')
             f.write(f'{n_bond_types} bond types\n\n')
 
+            # include angles if it applies
+            if add_angles:
+                f.write(f'{angles_total} angles\n')
+                f.write(f'{n_angle_types} angle types\n\n')
+
             # include dihedrals for s-layer
             if self.slayer:
                 f.write(f'{self.n_slayer_dihedrals} dihedrals\n')
@@ -804,7 +824,7 @@ class TriLmp():
             f.write('\n')
 
             # [COORDINATES] STANDARD SIMULATION SET-UP: only membrane and potentially nanoparticles
-            if (not self.slayer) and (not self.fix_rigid_symbiont) and (not heterogeneous_membrane):
+            if (not self.slayer) and (not self.fix_rigid_symbiont) and (not heterogeneous_membrane) and (not add_angles):
                 f.write(f'Atoms # hybrid\n\n')
                 for i in range(self.n_vertices):
                     f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
@@ -817,6 +837,16 @@ class TriLmp():
                     else:
                         for i in range(self.beads.n_beads):
                             f.write(f'{self.n_vertices+1+i} 2 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
+
+            elif add_angles:
+                f.write(f'Atoms # full\n\n')
+                for i in range(self.n_vertices):
+                    f.write(f'{i + 1} 0 1 1.0 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} \n')
+
+                # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
+                if self.beads.n_beads:
+                    for i in range(self.beads.n_beads):
+                        f.write(f'{self.n_vertices+1+i} 0 {int(self.beads.types[i])} 0 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} \n')
 
             # [COORDINATES] EXTENSION: SIMULATION WITH AN SLAYER
             elif self.slayer:
@@ -857,7 +887,7 @@ class TriLmp():
                             f.write(f'{self.n_vertices+1+i} 3 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
 
             # [VELOCITIES]
-            f.write(f'Velocities \n\n')
+            f.write(f'\nVelocities \n\n')
             # membrane particles are type 1
             for i in range(self.n_vertices):
                 f.write(f'{i + 1} 0.0 0.0 0.0 \n')
@@ -872,9 +902,9 @@ class TriLmp():
                         f.write(f'{self.n_vertices+1+i} {0} {0} {0}\n')
             # [BONDS]
             if self.slayer == False:
-                f.write(f'Bonds # zero special\n\n')
+                f.write(f'\nBonds # zero special\n\n')
             else:
-                f.write(f'Bonds # hybrid\n\n')
+                f.write(f'\nBonds # hybrid\n\n')
 
             # [BONDS] first type of bond -- for the fluid membrane
             for i in range(self.edges.shape[0]):
@@ -897,9 +927,21 @@ class TriLmp():
 
             # [DIHEDRALS] Only applicable to S-LAYER/elastic membrane
             if self.slayer:
-                f.write(f'Dihedrals # harmonic\n\n')
+                f.write(f'\nDihedrals # harmonic\n\n')
                 for i in range(self.n_slayer_dihedrals):
                     f.write(f'{i + 1} 1 {self.slayer_dihedrals[i, 0] +self.n_vertices} {self.slayer_dihedrals[i, 1]  +self.n_vertices} {self.slayer_dihedrals[i, 2]  +self.n_vertices} {self.slayer_dihedrals[i, 3]  +self.n_vertices}\n')
+
+            # [ANGLES] Useful for polymers e.g., for rigidity
+            if add_angles:
+                f.write(f'\nAngles # harmonic\n\n')
+                counter_angles = 1
+                # iterate over the types of angles
+                for angtypes in range(n_angle_types):
+                    triplets = angle_triplets[str(angtypes+1)]
+                    n_angles_in_triplet = len(triplets)
+                    for i in range(n_angles_in_triplet):
+                        f.write(f'{counter_angles} {angtypes+1} {triplets[i][0]} {triplets[i][1]} {triplets[i][2]}\n')
+                        counter_angles +=1
 
         # pass all the initial configuration data to LAMMPS to read
         self.lmp.command('read_data sim_setup.in add merge')
@@ -1514,15 +1556,16 @@ class TriLmp():
         print("No errors to report for run. Simulation begins.")
 
     def run(
-            self, N=0, integrators_defined = False, check_outofrange = False, 
-            check_outofrange_freq = -1, check_outofrange_cutoff = -1, fix_symbionts_near = True, 
+            self, N=0, integrators_defined = True, check_outofrange = False, 
+            check_outofrange_freq = -1, check_outofrange_cutoff = -1, fix_symbionts_near = False, 
             postequilibration_lammps_commands = None, seed = 123, current_step = 0,
             step_dependent_protocol = False, step_protocol_commands = None, step_protocol_frequency = 0,
             steps_in_protocol = 0, evaluate_configuration = False, evaluate_inside_membrane = False,
             factor_inside_membrane=0, naive_compression = True, desired_interlayer_distance=0, 
             gcmc_by_hand=False, desired_particles_source=0, pure_sink=False, desired_particles_sink=0,
             ghost_membrane_consumes = False, cutoff_consumption = 0, move_membrane=True, force_field_normals = False,
-            A_force =0 , B_force =0,
+            A_force =0 , B_force =0, linear_force=False, exponential_force = False, concentration_source = 0, 
+            diffusion_coefficient = 1, evaluate_tip = False, tip_range = 0, evaluate_tip_freq = 0
         ):
 
         """
@@ -1541,10 +1584,26 @@ class TriLmp():
         - fix_symbionts_near : place symbionts within interaction range of membrane
         """
 
+        # if you want to move the membrane or not
         self.move_membrane = move_membrane
+
+        # if you want to apply a force field normal to the membrane
         self.force_field_normals = force_field_normals
+
+        # if you want that force field to be linear in x, f(x) = A*x + B
+        self.linear_force = linear_force
         self.A_force = A_force
         self.B_force = B_force
+        # if you want that force field to be building up, c(x) = cs(1-erc)
+        self.exponential_force = exponential_force
+        self.concentration_source = concentration_source
+        self.diffusion_coefficient = diffusion_coefficient
+
+        # [HARDCODED STUFF] apply heuristic factor to transform concentration into force
+        rc = 1.5
+        interaction_volume = 4/3 * np.pi* rc**2
+        fmax = 0.5*np.pi/rc
+        self.concentration_source = 2/5*interaction_volume*fmax*self.concentration_source
 
         # set the numpy seed (MD + MC stepping)
         np.random.seed(seed=seed)
@@ -1603,6 +1662,9 @@ class TriLmp():
         # run simulation for dictated number
         # of MD steps
         while self.MDsteps<N:
+            
+            # get what is the actual simulation time right now
+            self.time_force = self.MDsteps * self.traj_steps
 
             # counter for updates and so on
             i+=1
@@ -1615,6 +1677,22 @@ class TriLmp():
 
             # check if simulation must stop
             self.halt_symbiont_simulation(i, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
+
+            # if applicable, define the tip group
+            if evaluate_tip:
+                pos_alloc=self.lmp.numpy.extract_atom("x")
+                self.mesh.x[:] = np.array(pos_alloc[:self.n_vertices])
+                self.beads.positions[:] = np.array(pos_alloc[self.n_vertices:self.n_vertices+self.beads.n_beads])
+                distance_beads_nanoparticle = np.sqrt((self.mesh.x[:, 0] - self.beads.positions[0,0])**2 + (self.mesh.x[:, 1] - self.beads.positions[0,1])**2 + (self.mesh.x[:, 2] - self.beads.positions[0,2])**2)
+                # get those particles that are within interaction range of the nanoparticle
+                indexes = np.where(distance_beads_nanoparticle < tip_range)[0]
+                # clear the group
+                self.lmp.command(f'group tip clear')
+                # add the nanoparticle
+                self.lmp.command(f'group tip id {self.n_vertices+1}')
+                # add the particles that we found are within range
+                for i in range(len(indexes)):
+                    self.lmp.command(f'group tip id {indexes[i]+1}')
 
             # post equilibration update, if it applies
             if self.MDsteps==self.equilibration_rounds and self.equilibrated == False:
@@ -1676,7 +1754,6 @@ class TriLmp():
                         r += 1.1*sigma_tilde
                         x, y, z = r*np.cos(theta)*np.sin(phi), r*np.sin(theta)*np.sin(phi), r*np.cos(phi)
 
-                        atoms_alloc = self.L.atoms
                         for q in range(self.beads.n_beads):
                             min_distance = 1000
                             xx, yy, zz = x[q], y[q], z[q]
@@ -1697,12 +1774,6 @@ class TriLmp():
                             pos_alloc[self.n_vertices+q, 0] = xtemp + 1.05*sigma_tilde*xtemp/rtemp
                             pos_alloc[self.n_vertices+q, 1] = ytemp + 1.05*sigma_tilde*ytemp/rtemp
                             pos_alloc[self.n_vertices+q, 2] = ztemp + 1.05*sigma_tilde*ztemp/rtemp
-
-                            """
-                            atoms_alloc[self.n_vertices+q].position[0] = xtemp + 1.05*sigma_tilde*xtemp/rtemp
-                            atoms_alloc[self.n_vertices+q].position[1] = ytemp + 1.05*sigma_tilde*ytemp/rtemp
-                            atoms_alloc[self.n_vertices+q].position[2] = ztemp + 1.05*sigma_tilde*ztemp/rtemp
-                            """
                             
                 # change status of the membrane
                 self.equilibrated = True
@@ -1754,7 +1825,67 @@ class TriLmp():
                 pos_alloc[self.n_vertices:self.n_vertices+self.n_faces] = compressed_membrane
 
                 if ghost_membrane_consumes:
-                    self.lmp.command(f'delete_atoms overlap {cutoff_consumption} metabolites inside')
+
+                    # [old implementation, it was giving some issues and not working as desired]
+                    #self.lmp.command(f'delete_atoms overlap {cutoff_consumption} metabolites ghostmem')
+
+                    # 1. find the limits of the membrane
+                    xmax = np.max(self.mesh.x[:, 0])
+                    xmin = np.min(self.mesh.x[:, 0])
+                    ymax = np.max(self.mesh.x[:, 1])
+                    ymin = np.min(self.mesh.x[:, 1])
+                    zmax = np.max(self.mesh.x[:, 2])
+                    zmin = np.min(self.mesh.x[:, 2])
+
+                    #print("XMAX: ", xmax)
+                    #print("XMIN: ", xmin)
+                    #print("YMAX: ", ymax)
+                    #print("YMIN: ", ymin)
+                    #print("ZMAX: ", zmax)
+                    #print("ZMIN: ", zmin)
+
+                    # 2. only care about the reactants that have the potentially to be within cutoff
+                    # get the coordinates of the reactants
+                    coordinates_reactants = pos_alloc[self.n_vertices+self.n_faces:]
+                    # get those reactants that are within limits
+                    index_selection = np.where((coordinates_reactants[:, 0]<xmax) & (coordinates_reactants[:, 0]>xmin) & (coordinates_reactants[:, 1]<ymax) & (coordinates_reactants[:, 1]>ymin) & (coordinates_reactants[:, 2]<zmax) & (coordinates_reactants[:, 2]>zmin))[0]
+                    selected_reactants = coordinates_reactants[index_selection]
+
+                    #print("THESE ARE THE INDEXES OF THE SELECTED REACTANTS: ", index_selection)
+                    #print("IS 51513 IN THERE? ", ((51513-self.n_vertices+self.n_faces) in index_selection))
+                    
+                    # 3. find the overlapping guys
+                    # build a KD-tree for the points in the second group; compressed_membrane here is M_points
+                    kd_tree = KDTree(compressed_membrane)
+                    # query the KD-tree to find the nearest neighbor in M_points for each point in N_points
+                    distances, indices = kd_tree.query(selected_reactants)
+                    #print("THESE ARE THE DISTANCES: ", distances)
+                    # find the distances that are within interaction range
+                    index_overlap = np.where(distances<=cutoff_consumption)[0]
+                    if len(index_overlap)>0:
+
+                        ids = self.lmp.numpy.extract_atom("id")
+                        ids_reactants = ids[self.n_vertices+self.n_faces:]
+                        
+                        #print(ids)
+                        #print(ids[self.n_vertices+self.n_faces])
+                        #print(ids[self.n_vertices+self.n_faces-1])
+                        #print("THIS IS INDEX OVERLAP : ", index_overlap)
+                        
+                        # get the indexes for the group
+                        index_group = ids_reactants[index_selection[index_overlap]]
+
+                        #print("WHAT IS INDEX GROUP: ", index_group)
+
+                        # start adding particles that have been selected inside the group
+                        for ig in range(len(index_group)):
+                            #print("POSITION OF THIS PARTICLE: ", pos_alloc[index_group[ig]])
+                            self.lmp.command(f'group consumeoverlapping id {index_group[ig]}')
+                        
+                        #if len(index_group)>0:
+                        #    wait = input()
+
+                        self.lmp.command(f'delete_atoms group consumeoverlapping')
 
             # do gcmc by hand rather than using fix gcmc
             if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and gcmc_by_hand:
@@ -1770,11 +1901,18 @@ class TriLmp():
                 particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
 
                 # add needed particles in source (assuming 3 particle types)
-                to_add = desired_particles_source - particles_source[2]
+                if evaluate_inside_membrane:
+                    to_add = desired_particles_source - particles_source[2]
+                else:
+                    to_add = desired_particles_source - particles_source[1]
 
                 # if you need to add particles because there are not enough
                 if to_add>0:
-                    self.lmp.command(f'create_atoms 3 random {int(to_add)} {i+1} SOURCE')
+                    if evaluate_inside_membrane:
+                        self.lmp.command(f'create_atoms 3 random {int(to_add)} {i+1} SOURCE')
+                    else:
+                        self.lmp.command(f'create_atoms 2 random {int(to_add)} {i+1} SOURCE')
+
                 if to_add<0:
                     self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3}')
 
@@ -1788,7 +1926,10 @@ class TriLmp():
                
                 # if you want to regulate the number of particles in the sink
                 if not pure_sink:
-                    to_delete = desired_particles_sink - particles_sink[2]
+                    if evaluate_inside_membrane:
+                        to_delete = desired_particles_sink - particles_sink[2]
+                    else:
+                        to_delete = desired_particles_sink - particles_sink[1]
 
                 # if you need to delete particles because there are too many
                 if to_delete<0:
@@ -1796,14 +1937,20 @@ class TriLmp():
 
                 # if you need to add particles because there are too few in the sink
                 if to_delete>0:
-                    self.lmp.command(f'create_atoms 3 random {int(to_delete)} {i+4} SINK')
+                    if evaluate_inside_membrane:
+                        self.lmp.command(f'create_atoms 3 random {int(to_delete)} {i+4} SINK')
+                    else:
+                        self.lmp.command(f'create_atoms 2 random {int(to_delete)} {i+4} SINK')
 
                 # delete particles in sink by default
                 if pure_sink:
                     self.lmp.command(f'delete_atoms region SINK')
 
                 # reevaluate group type 3 for correct integration
-                self.lmp.command(f'group metabolites type 3')
+                if evaluate_inside_membrane:
+                    self.lmp.command(f'group metabolites type 3')
+                else:
+                    self.lmp.command(f'group metabolites type 2')
 
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
@@ -1842,7 +1989,10 @@ class TriLmp():
         """
         
         def wrap(self,  lmp, ntimestep, nlocal, tag, x,f,  *args, **kwargs):
-
+            
+            # save the bead positions
+            self.beads.positions=x[self.n_vertices:]
+            # save the mesh positions
             self.mesh.x = x[:self.n_vertices].reshape(self.mesh.x[:self.n_vertices].shape)
             #self.lmp.fix_external_set_energy_global("ext", self.estore.energy(self.mesh.trimesh))
             return func(self, lmp, ntimestep, nlocal, tag, x,f, *args, **kwargs)
@@ -1873,7 +2023,17 @@ class TriLmp():
             mean_vertex_normals = trimesh.geometry.mean_vertex_normals(len(self.mesh.x), self.mesh.f, face_normals)
 
             # force field in the direction of x
-            magnitude_force = self.A_force*self.mesh.x[:, 0] + self.B_force
+            if self.linear_force:
+                magnitude_force = self.A_force*self.mesh.x[:, 0] + self.B_force
+
+            elif self.exponential_force:
+                # initial condition, there is no force
+                if self.time_force == 0:
+                    magnitude_force = self.mesh.x[:, 0] * 0
+                # force starts later on (note that the maximum is achieved at x = 0)
+                elif self.time_force>0:
+                    magnitude_force = self.concentration_source*(1-erf(self.mesh.x[:, 0]/(2*np.sqrt(self.diffusion_coefficient*self.time_force))))
+
             magnitude_force_newaxis = magnitude_force[:, np.newaxis]
 
             forces_to_add = mean_vertex_normals*magnitude_force_newaxis
@@ -1989,7 +2149,7 @@ class TriLmp():
                 bending_energy_temp = self.estore.properties(self.mesh.trimesh).bending
 
                 with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
-                    f.write(f'{i} {self.estore.energy(self.mesh.trimesh)} {self.acceptance_rate} {mesh_volume} {mesh_area} {bending_energy_temp}\n')
+                    f.write(f'{i} {self.MDsteps} {self.estore.energy(self.mesh.trimesh)} {self.acceptance_rate} {mesh_volume} {mesh_area} {bending_energy_temp}\n')
                     f.flush()
             else:
                 with open(f'{self.output_params.output_prefix}_system.dat','a+') as f:
@@ -2190,7 +2350,7 @@ class TriLmp():
                 self.counter["flip"],
                 self.beads.n_beads,
                 self.beads.n_bead_types,
-                self.lmp.numpy.extract_atom('x')[self.n_vertices:,:],
+                self.beads.positions,
                 self.lmp.numpy.extract_atom('v')[self.n_vertices:, :],
                 self.beads.bead_sizes,
                 self.beads.types,
