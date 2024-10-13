@@ -1813,16 +1813,40 @@ class TriLmp():
             # evaluation of inside of membrane and application of corresponding protocol
             if evaluate_inside_membrane:
                 
-                # extract the particle coordinates (more to pass them later on)
+                # extract the particle coordinates
                 pos_alloc=self.lmp.numpy.extract_atom("x")
 
+                # extract the atom types --> 
+                # this should give me the IDs in a consistent manner
+                types_atoms = self.lmp.numpy.extract_atom("type")
+                
+                # [DEBUGGING PURPOSES]
+                #print("TYPES ATOMS: ", types_atoms)
+                #print("TYPES ATOMS SUPPOSEDLY MEMBRANE: ", types_atoms[:self.n_vertices])
+                #print("CHECK IF ALL THOSE ATOMS ARE TYPE 1", np.any(types_atoms[:self.n_vertices]!=1))
+                #if np.any(types_atoms[:self.n_vertices]!=1):
+                #    print("PROBLEM: THERE ARE NON 1 ATOMS WHERE YOU THOUGHT THERE SHOULDN'T BE")
+                #    wait = input()
+
+                # get the indexes of the ghost particles
+                ghost_particle_indexes = np.where(types_atoms == 2)[0]
+                
+                # [DEBUGGING PURPOSES]
+                #print("GHOST PARTICLE INDEXES: ", ghost_particle_indexes)
+                #print("CHECK IF ALL THOSE ATOMS ARE TYPE 2", np.any(types_atoms[ghost_particle_indexes]!=2))
+                #if np.any(types_atoms[ghost_particle_indexes]!=2):
+                #    print("PROBLEM: THERE ARE NON 2 ATOMS WHERE YOU THOUGHT THERE SHOULDN'T BE")
+                #    wait = input()
+
+                # construct a trimesh mesh to compute the face normals and
+                # know where to position the ghost membrane
                 new_mesh = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f)
                 baricenters = new_mesh.triangles_center
                 face_normals = new_mesh.face_normals
                 compressed_membrane = baricenters - desired_interlayer_distance*face_normals
 
                 # inform lammps of the coordinates again
-                pos_alloc[self.n_vertices:self.n_vertices+self.n_faces] = compressed_membrane
+                pos_alloc[ghost_particle_indexes] = compressed_membrane
 
                 if ghost_membrane_consumes:
 
@@ -1837,22 +1861,25 @@ class TriLmp():
                     zmax = np.max(self.mesh.x[:, 2])
                     zmin = np.min(self.mesh.x[:, 2])
 
-                    #print("XMAX: ", xmax)
-                    #print("XMIN: ", xmin)
-                    #print("YMAX: ", ymax)
-                    #print("YMIN: ", ymin)
-                    #print("ZMAX: ", zmax)
-                    #print("ZMIN: ", zmin)
+                    # get the indexes of the reactant particles
+                    reactant_particle_indexes = np.where(types_atoms == 3)[0]
+
+                    # [FOR DEBUGGING PURPOSES]
+                    #print("REACTANT PARTICLE INDEXES: ", reactant_particle_indexes)
+                    #print("CHECK IF ALL THOSE ATOMS ARE TYPE 3", np.any(types_atoms[reactant_particle_indexes]!=3))
+                    #if np.any(types_atoms[reactant_particle_indexes]!=3):
+                    #    print("PROBLEM: THERE ARE NON 3 ATOMS WHERE YOU THOUGHT THERE SHOULDN'T BE")
+                    #    wait = input()
 
                     # 2. only care about the reactants that have the potentially to be within cutoff
                     # get the coordinates of the reactants
-                    coordinates_reactants = pos_alloc[self.n_vertices+self.n_faces:]
+                    coordinates_reactants = pos_alloc[reactant_particle_indexes]
+                    
                     # get those reactants that are within limits
                     index_selection = np.where((coordinates_reactants[:, 0]<xmax) & (coordinates_reactants[:, 0]>xmin) & (coordinates_reactants[:, 1]<ymax) & (coordinates_reactants[:, 1]>ymin) & (coordinates_reactants[:, 2]<zmax) & (coordinates_reactants[:, 2]>zmin))[0]
                     selected_reactants = coordinates_reactants[index_selection]
 
                     #print("THESE ARE THE INDEXES OF THE SELECTED REACTANTS: ", index_selection)
-                    #print("IS 51513 IN THERE? ", ((51513-self.n_vertices+self.n_faces) in index_selection))
                     
                     # 3. find the overlapping guys
                     # build a KD-tree for the points in the second group; compressed_membrane here is M_points
@@ -1862,18 +1889,13 @@ class TriLmp():
                     #print("THESE ARE THE DISTANCES: ", distances)
                     # find the distances that are within interaction range
                     index_overlap = np.where(distances<=cutoff_consumption)[0]
+
                     if len(index_overlap)>0:
 
-                        ids = self.lmp.numpy.extract_atom("id")
-                        ids_reactants = ids[self.n_vertices+self.n_faces:]
-                        
-                        #print(ids)
-                        #print(ids[self.n_vertices+self.n_faces])
-                        #print(ids[self.n_vertices+self.n_faces-1])
-                        #print("THIS IS INDEX OVERLAP : ", index_overlap)
-                        
+                        ids_atoms = self.lmp.numpy.extract_atom("id")
+
                         # get the indexes for the group
-                        index_group = ids_reactants[index_selection[index_overlap]]
+                        index_group = ids_atoms[reactant_particle_indexes[index_selection[index_overlap]]]
 
                         #print("WHAT IS INDEX GROUP: ", index_group)
 
@@ -1881,11 +1903,12 @@ class TriLmp():
                         for ig in range(len(index_group)):
                             #print("POSITION OF THIS PARTICLE: ", pos_alloc[index_group[ig]])
                             self.lmp.command(f'group consumeoverlapping id {index_group[ig]}')
-                        
-                        #if len(index_group)>0:
-                        #    wait = input()
 
-                        self.lmp.command(f'delete_atoms group consumeoverlapping')
+                        self.lmp.command(f'delete_atoms group consumeoverlapping compress no')
+                        
+                        # [DEBUGGING PURPOSES]
+                        #if len(index_group)>5:
+                        #    wait = input()
 
             # do gcmc by hand rather than using fix gcmc
             if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and gcmc_by_hand:
@@ -1914,7 +1937,7 @@ class TriLmp():
                         self.lmp.command(f'create_atoms 2 random {int(to_add)} {i+1} SOURCE')
 
                 if to_add<0:
-                    self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3}')
+                    self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3} compress no')
 
                 # --------------------
                 # SINK
@@ -1933,7 +1956,7 @@ class TriLmp():
 
                 # if you need to delete particles because there are too many
                 if to_delete<0:
-                    self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2}')
+                    self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2} compress no')
 
                 # if you need to add particles because there are too few in the sink
                 if to_delete>0:
@@ -1944,7 +1967,7 @@ class TriLmp():
 
                 # delete particles in sink by default
                 if pure_sink:
-                    self.lmp.command(f'delete_atoms region SINK')
+                    self.lmp.command(f'delete_atoms region SINK compress no')
 
                 # reevaluate group type 3 for correct integration
                 if evaluate_inside_membrane:
@@ -2010,9 +2033,17 @@ class TriLmp():
         are extracted, and LAMMPS uses them to act on the membrane beads.
         We make it be equal, not add?
         """
+
         #print(tag)
         #tag_clear=[x-1 for x in tag if x <= self.n_vertices]
         if self.move_membrane:
+
+            # [MMB COMMENT] SHOULD I INCLUDE THIS SANITY CHECK?
+            # this should give me the IDs in a consistent manner
+            #types_atoms = self.lmp.numpy.extract_atom("type")
+            # get the indexes of the ghost particles
+            #membrane_particle_indexes = np.where(types_atoms == 2)[0]
+            
             f[:self.n_vertices]=-self.estore.gradient(self.mesh.trimesh)
 
         # include a force field that acts normal to the surface of the membrane
