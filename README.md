@@ -81,6 +81,7 @@ cp _skbuild/linux-x86_64-3.11/cmake-build/libtrimem.so src/trimem/.
 cp _skbuild/linux-x86_64-3.11/cmake-build/Build/lib/* src/trimem/.
 ```
 
+Depending on what changes you do to the C part of the code, you might need to copy these libraries again.
 
 ### 4. Installing LAMMPS
 
