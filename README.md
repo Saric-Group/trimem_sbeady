@@ -94,6 +94,8 @@ Go back to the directory where you want to have your install folder and get lamm
 git clone -b stable https://github.com/lammps/lammps.git lammps
 ```
 
+In the future, we will add the LAMMPS version the team has worked on as a submodule.
+
 We can now start installing LAMMPS. Go first to the ```lammps``` directory and create the ```build``` folder.
 ```bash
 cd lammps                
