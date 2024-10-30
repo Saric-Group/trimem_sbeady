@@ -1195,6 +1195,7 @@ void expose_flips_nsr(py::module& m)
         py::arg("mesh"),
         py::arg("estore"),
         py::arg("flip_ratio"),
+        py::arg("ids_notflip"),
         R"pbdoc(
         Batch parallel flip sweep.
 

@@ -428,6 +428,8 @@ class TriLmp():
         self.n_bond_types         = n_bond_types
         self.MDsteps              = 0.0
         self.acceptance_rate      = 0.0
+        self.heterogeneous_membrane = heterogeneous_membrane
+        self.heterogeneous_membrane_id = heterogeneous_membrane_id
 
         # used for (TRIMEM) minimization
         self.flatten = True
@@ -884,7 +886,7 @@ class TriLmp():
                             f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
                     else:
                         for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} 3 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
+                            f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
 
             # [VELOCITIES]
             f.write(f'\nVelocities \n\n')
@@ -1175,7 +1177,10 @@ class TriLmp():
         elif self.algo_params.flip_type == "serial":
             self._flips = lambda: m.flip_nsr(self.mesh.trimesh, self.estore, self.algo_params.flip_ratio)
         elif self.algo_params.flip_type == "parallel":
-            self._flips = lambda: m.pflip_nsr(self.mesh.trimesh, self.estore, self.algo_params.flip_ratio)
+            if self.heterogeneous_membrane_id is not None:
+                self._flips = lambda: m.pflip_nsr(self.mesh.trimesh, self.estore, self.algo_params.flip_ratio, self.heterogeneous_membrane_id)
+            else:
+                self._flips = lambda: m.pflip_nsr(self.mesh.trimesh, self.estore, self.algo_params.flip_ratio, [])
         else:
             raise ValueError("Wrong flip-type: {}".format(self.algo_params.flip_type))
         
@@ -1228,10 +1233,21 @@ class TriLmp():
             
             # 'test_mode' allows for time optimization (less neighbour lists built)
             if self.test_mode:
+                
+                # find the last ID
+                # to ensure the rebuilding of the neighbour
+                #j = nf-1
+                #last_id = nf-1
+                
+                #while j>0:
+                #    if (flip_id[j][0] in self.heterogeneous_membrane_id) or (flip_id[j][1] in self.heterogeneous_membrane_id) or (flip_id[j][2] in self.heterogeneous_membrane_id) or (flip_id[j][3] in self.heterogeneous_membrane_id):
+                #        pass
+                #    else:    
+                #        last_id = j
+                #        break
+                #    j-= 1
 
                 for i in range(nf-1):
-                    if i == nf-1:
-                        del_com = 'remove special'
 
                     # ---------------------------------------------------
                     # ABOUT THESE COMMANDS (see LAMMPS documentation)
@@ -1246,13 +1262,13 @@ class TriLmp():
                     self.lmp.command(f'group flip_off id {flip_id[i][2] + 1} {flip_id[i][3] + 1}') # you MUST create a group on which delete_bonds will adct
                     self.lmp.command(f'delete_bonds flip_off bond 1 remove') # you must (?) remove the bonds you are turning off
                     self.lmp.command('group flip_off clear') # you must clear the group or else particles will be added to it
-                
+
                 # LAST BOND: TRIGGER INTERNAL LIST CREATION NOW (create_bonds)
                 self.lmp.command(f'create_bonds single/bond 1 {flip_id[nf-1][0] + 1} {flip_id[nf-1][1] + 1} special yes') # the 'special yes' here is invoked to compute the weighting list
                 self.lmp.command(f'group flip_off id {flip_id[nf-1][2] + 1} {flip_id[nf-1][3] + 1}')
                 self.lmp.command(f'delete_bonds flip_off bond 1 remove special') # maybe the special is not needed here?
                 self.lmp.command('group flip_off clear')
-
+                
             # original implementation - more time-consuming
             else:
 
@@ -1471,6 +1487,7 @@ class TriLmp():
     ############################################################################
 
     def halt_symbiont_simulation(self, step, check_outofrange, check_outofrange_freq, check_outofrange_cutoff):
+
         if (self.equilibrated) and (check_outofrange) and (step%check_outofrange_freq ==0):
             pos_alloc=self.lmp.numpy.extract_atom("x")
             self.mesh.x[:] = np.array(pos_alloc[:self.n_vertices])
@@ -1771,9 +1788,9 @@ class TriLmp():
                             ztemp = self.mesh.x[index, 2]
                             rtemp = np.sqrt(xtemp**2 + ytemp**2 + ztemp**2)
 
-                            pos_alloc[self.n_vertices+q, 0] = xtemp + 1.05*sigma_tilde*xtemp/rtemp
-                            pos_alloc[self.n_vertices+q, 1] = ytemp + 1.05*sigma_tilde*ytemp/rtemp
-                            pos_alloc[self.n_vertices+q, 2] = ztemp + 1.05*sigma_tilde*ztemp/rtemp
+                            pos_alloc[self.n_vertices+q, 0] = xtemp + 1.05*sigma_tilde[q]*xtemp/rtemp
+                            pos_alloc[self.n_vertices+q, 1] = ytemp + 1.05*sigma_tilde[q]*ytemp/rtemp
+                            pos_alloc[self.n_vertices+q, 2] = ztemp + 1.05*sigma_tilde[q]*ztemp/rtemp
                             
                 # change status of the membrane
                 self.equilibrated = True
@@ -1828,8 +1845,15 @@ class TriLmp():
                 #    print("PROBLEM: THERE ARE NON 1 ATOMS WHERE YOU THOUGHT THERE SHOULDN'T BE")
                 #    wait = input()
 
+                if self.heterogeneous_membrane:
+                    type_for_ghost = 3
+                    type_for_reactant = 4
+                else:
+                    type_for_ghost = 2
+                    type_for_reactant = 3
+
                 # get the indexes of the ghost particles
-                ghost_particle_indexes = np.where(types_atoms == 2)[0]
+                ghost_particle_indexes = np.where(types_atoms == type_for_ghost)[0]
                 
                 # [DEBUGGING PURPOSES]
                 #print("GHOST PARTICLE INDEXES: ", ghost_particle_indexes)
@@ -1849,7 +1873,7 @@ class TriLmp():
                 pos_alloc[ghost_particle_indexes] = compressed_membrane
 
                 if ghost_membrane_consumes:
-
+                    
                     # [old implementation, it was giving some issues and not working as desired]
                     #self.lmp.command(f'delete_atoms overlap {cutoff_consumption} metabolites ghostmem')
 
@@ -1862,7 +1886,7 @@ class TriLmp():
                     zmin = np.min(self.mesh.x[:, 2])
 
                     # get the indexes of the reactant particles
-                    reactant_particle_indexes = np.where(types_atoms == 3)[0]
+                    reactant_particle_indexes = np.where(types_atoms == type_for_reactant)[0]
 
                     # [FOR DEBUGGING PURPOSES]
                     #print("REACTANT PARTICLE INDEXES: ", reactant_particle_indexes)
@@ -1923,19 +1947,18 @@ class TriLmp():
                 # count how many particles are there in the source
                 particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
 
-                # add needed particles in source (assuming 3 particle types)
-                if evaluate_inside_membrane:
-                    to_add = desired_particles_source - particles_source[2]
-                else:
-                    to_add = desired_particles_source - particles_source[1]
+                # add needed particles in source (assuming reactants always last type)
+                to_add = desired_particles_source - particles_source[-1]
 
                 # if you need to add particles because there are not enough
                 if to_add>0:
                     if evaluate_inside_membrane:
-                        self.lmp.command(f'create_atoms 3 random {int(to_add)} {i+1} SOURCE')
+                        if self.heterogeneous_membrane:
+                            self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE')
+                        else:
+                            self.lmp.command(f'create_atoms 3 random {int(to_add)} {i+1} SOURCE')
                     else:
                         self.lmp.command(f'create_atoms 2 random {int(to_add)} {i+1} SOURCE')
-
                 if to_add<0:
                     self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3} compress no')
 
@@ -1949,10 +1972,7 @@ class TriLmp():
                
                 # if you want to regulate the number of particles in the sink
                 if not pure_sink:
-                    if evaluate_inside_membrane:
-                        to_delete = desired_particles_sink - particles_sink[2]
-                    else:
-                        to_delete = desired_particles_sink - particles_sink[1]
+                    to_delete = desired_particles_sink - particles_sink[-1]
 
                 # if you need to delete particles because there are too many
                 if to_delete<0:
@@ -1961,7 +1981,10 @@ class TriLmp():
                 # if you need to add particles because there are too few in the sink
                 if to_delete>0:
                     if evaluate_inside_membrane:
-                        self.lmp.command(f'create_atoms 3 random {int(to_delete)} {i+4} SINK')
+                        if self.heterogeneous_membrane:
+                            self.lmp.command(f'create_atoms 4 random {int(to_delete)} {i+4} SINK')
+                        else:
+                            self.lmp.command(f'create_atoms 3 random {int(to_delete)} {i+4} SINK')
                     else:
                         self.lmp.command(f'create_atoms 2 random {int(to_delete)} {i+4} SINK')
 
@@ -1971,7 +1994,10 @@ class TriLmp():
 
                 # reevaluate group type 3 for correct integration
                 if evaluate_inside_membrane:
-                    self.lmp.command(f'group metabolites type 3')
+                    if self.heterogeneous_membrane:
+                        self.lmp.command(f'group metabolites type 4')
+                    else:
+                        self.lmp.command(f'group metabolites type 3')
                 else:
                     self.lmp.command(f'group metabolites type 2')
 
