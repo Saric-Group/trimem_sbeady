@@ -86,8 +86,8 @@ Depending on what changes you do to the C part of the code, you might need to co
 ### 4. Installing LAMMPS
 
 LAMMPS has to be installed using python shared libraries and some specific packages.
-If you already have LAMMPS you might have to reinstall it. In any case you will have to 
-perform the python install using your Trienv environment as we detail below.
+If you already have LAMMPS you might have to recompile it. In any case you will have to 
+perform the python install using your Trienv environment as we detail below. Saric group members are working on a patched LAMMPS version that should be available soon.
 
 Go back to the directory where you want to have your install folder and get lammps from git by running
 
