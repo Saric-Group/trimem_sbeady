@@ -20,9 +20,7 @@ To run simulations with TriLMP, you will be creating an object of the class ```T
 
 ## Installation guide
 
-TriLMP has been successfully installed and tested in:
-- Linux
-- Mac OS (Sonoma)
+TriLMP has been successfully installed and tested in Linux. Members of the group have managed to install and run TriLMP on MAC OS (Sonoma). However, the installation guide detailed below might not work for such OS. Whenever possible, we recommend the installation in Linux. We are currently working on making the software easy to install in MAC OS.
 
 We suggest installing TriLmp in a conda environment and then install trimem/trilmp as a editable install.
 This allows you to alter trilmp functionality by directly tinkering with the src/trimem/trilmp.py file if needed.
