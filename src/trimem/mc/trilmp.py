@@ -405,7 +405,10 @@ class TriLmp():
                  n_angle_types=0,
                  n_angles=0,
                  angles_total=0,
-                 angle_triplets=None  # Dictionary with structure {'angle_type':[[A, B, C], [D, E, F]]}
+                 angle_triplets=None,  # Dictionary with structure {'angle_type':[[A, B, C], [D, E, F]]}
+
+                 # pickling parameters
+                 generate_pickles = True
                  ):
 
 
@@ -430,6 +433,9 @@ class TriLmp():
         self.acceptance_rate      = 0.0
         self.heterogeneous_membrane = heterogeneous_membrane
         self.heterogeneous_membrane_id = heterogeneous_membrane_id
+
+        # decide whether or not you want pickles
+        self.generate_pickles     = generate_pickles
 
         # used for (TRIMEM) minimization
         self.flatten = True
@@ -1582,7 +1588,8 @@ class TriLmp():
             gcmc_by_hand=False, desired_particles_source=0, pure_sink=False, desired_particles_sink=0,
             ghost_membrane_consumes = False, cutoff_consumption = 0, move_membrane=True, force_field_normals = False,
             A_force =0 , B_force =0, linear_force=False, exponential_force = False, concentration_source = 0, 
-            diffusion_coefficient = 1, evaluate_tip = False, tip_range = 0, evaluate_tip_freq = 0
+            diffusion_coefficient = 1, evaluate_tip = False, tip_range = 0, evaluate_tip_freq = 0,
+            interaction_range = 1.45
         ):
 
         """
@@ -1680,6 +1687,9 @@ class TriLmp():
         # of MD steps
         while self.MDsteps<N:
             
+            print(self.MDsteps)
+            print(self.equilibrated)
+
             # get what is the actual simulation time right now
             self.time_force = self.MDsteps * self.traj_steps
 
@@ -1713,10 +1723,11 @@ class TriLmp():
 
             # post equilibration update, if it applies
             if self.MDsteps==self.equilibration_rounds and self.equilibrated == False:
-
+                
                 if self.debug_mode:
                     print("These are your current fixes pre equilibration: ")
                     print(self.L.fixes)
+                    
 
                 """
                 # write down existing fixes
@@ -1740,7 +1751,7 @@ class TriLmp():
                     if self.beads.n_beads==1:
                         coord_bead = self.mesh.x[0]
                         rtemp      = np.sqrt(coord_bead[0]**2 + coord_bead[1]**2 + coord_bead[2]**2)
-                        buffering  = 1.1
+                        buffering  = interaction_range
                         sigma_tilde = 0.5*(1+self.beads.bead_sizes[0])
                         x = coord_bead[0] + buffering*sigma_tilde*coord_bead[0]/rtemp
                         y = coord_bead[1] + buffering*sigma_tilde*coord_bead[1]/rtemp
@@ -1768,7 +1779,7 @@ class TriLmp():
                         theta = 2*np.pi*i/goldenRatio
                         phi = np.arccos(1-2*(i+0.5)/n)
                         r = np.sqrt(self.mesh.x[0, 0]**2 + self.mesh.x[0, 1]**2 + self.mesh.x[0, 2]**2)
-                        r += 1.1*sigma_tilde
+                        r += interaction_range*sigma_tilde
                         x, y, z = r*np.cos(theta)*np.sin(phi), r*np.sin(theta)*np.sin(phi), r*np.cos(phi)
 
                         for q in range(self.beads.n_beads):
@@ -1788,9 +1799,9 @@ class TriLmp():
                             ztemp = self.mesh.x[index, 2]
                             rtemp = np.sqrt(xtemp**2 + ytemp**2 + ztemp**2)
 
-                            pos_alloc[self.n_vertices+q, 0] = xtemp + 1.05*sigma_tilde[q]*xtemp/rtemp
-                            pos_alloc[self.n_vertices+q, 1] = ytemp + 1.05*sigma_tilde[q]*ytemp/rtemp
-                            pos_alloc[self.n_vertices+q, 2] = ztemp + 1.05*sigma_tilde[q]*ztemp/rtemp
+                            pos_alloc[self.n_vertices+q, 0] = xtemp + interaction_range*sigma_tilde[q]*xtemp/rtemp # old interaction range was 1.05
+                            pos_alloc[self.n_vertices+q, 1] = ytemp + interaction_range*sigma_tilde[q]*ytemp/rtemp
+                            pos_alloc[self.n_vertices+q, 2] = ztemp + interaction_range*sigma_tilde[q]*ztemp/rtemp
                             
                 # change status of the membrane
                 self.equilibrated = True
@@ -2186,9 +2197,14 @@ class TriLmp():
             # make checkpoints alternating between two points
             self.cpt_writer()
             
-        if (self.MDsteps % self.output_params.info == 0):
-            with open(f"checkpoints/ckpt_MDs_{self.MDsteps}_.pickle", 'wb') as f:
-                pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+        if self.generate_pickles:
+            if (self.MDsteps % self.output_params.info == 0):
+                # MMB old pickling: produces too much data
+                #with open(f"checkpoints/ckpt_MDs_{self.MDsteps}_.pickle", 'wb') as f:
+                #    pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                # better to have a single pickle!
+                with open(f"ckpt.pickle", 'wb') as f:
+                    pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
         
         # MMB open to clean-up
         if  self.MDsteps ==1:
