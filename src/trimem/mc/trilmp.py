@@ -374,6 +374,14 @@ class TriLmp():
                  bead_sizes=0.0,                # bead sizes
                  bead_types=[2],                 # bead types
                  n_bond_types = 1,
+                 bead_bonds = None,
+
+                 # EXTENSIONS MMB:
+                 # tethering binders on the surface of the membrane
+                 multivalency=False,
+                 multivalent_linker_length = 0.0,
+                 multivalent_linker_stiffness = 0.0,
+                 multivalent_bonds            = None,
 
                  # EXTENSIONS MMB: ELASTIC MEMBRANE/S-LAYER
                  # (must be initialized in init because affects input file)
@@ -655,6 +663,22 @@ class TriLmp():
         add_tether=False
 
         ########################################################################
+        #                  EXTENSION: MULTIVALENCY                             #
+        ########################################################################
+        self.multivalency = multivalency
+        if multivalency:
+            self.multivalent_linker_length=multivalent_linker_length
+            self.multivalent_linker_stiffness=multivalent_linker_stiffness
+            n_bond_types+=1
+            n_tethers=self.mesh.x.shape[0]
+            bond_text=f"""
+                        special_bonds lj/coul 0.0 0.0 0.0
+                        bond_style hybrid zero nocoeff harmonic
+                        bond_coeff 1 zero 0.0
+                        bond_coeff 2 harmonic {self.multivalent_linker_stiffness} {self.multivalent_linker_length}
+                    """
+
+        ########################################################################
         #             EXTENSION: ELASTIC MEMBRANE/SLAYER                       #
         ########################################################################
 
@@ -750,6 +774,7 @@ class TriLmp():
             atom_style_text = "full" # molecular (we need dihedrals) + charge
             angle_style_text = f"angle/types {n_angle_types}"
             angle_style_text += " extra/angle/per/atom 4 "
+
         # modifications to atom_style if s-layer/elastic membrane exists
         if self.slayer:
             atom_style_text = "full" # molecular (we need dihedrals) + charge
@@ -813,6 +838,7 @@ class TriLmp():
             f.write(f'{self.mesh.x.shape[0]+self.beads.n_beads+self.n_slayer+self.fix_rigid_symbiont_nparticles} atoms\n')
             f.write(f'{num_particle_types} atom types\n')
             f.write(f'{self.edges.shape[0]+n_tethers+self.n_slayer_bonds} bonds\n')
+            print("ADDING EDGES: ", self.edges.shape[0]+n_tethers)
             f.write(f'{n_bond_types} bond types\n\n')
 
             # include angles if it applies
@@ -839,13 +865,9 @@ class TriLmp():
 
                 # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
                 if self.beads.n_beads:
-                    if self.beads.n_bead_types>1:
-                        for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
-                    else:
-                        for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} 2 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
-
+                    for i in range(self.beads.n_beads):
+                        f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
+        
             elif add_angles:
                 f.write(f'Atoms # full\n\n')
                 for i in range(self.n_vertices):
@@ -889,7 +911,7 @@ class TriLmp():
                 if self.beads.n_beads:
                     if self.beads.n_bead_types>1:
                         for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
+                            f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
                     else:
                         for i in range(self.beads.n_beads):
                             f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
@@ -920,6 +942,10 @@ class TriLmp():
             # [BONDS] second type of bond -- for the slayer
             for i in range(self.n_slayer_bonds):
                 f.write(f'{self.edges.shape[0] + i + 1} 2 {self.slayer_bonds[i, 0] + self.n_vertices} {self.slayer_bonds[i, 1] + self.n_vertices}\n')
+
+            if multivalency:
+                for i in range(len(multivalent_bonds)):
+                    f.write(f'{self.edges.shape[0] + i + 1} 2 {multivalent_bonds[i, 0]+1} {multivalent_bonds[i, 1]+1}\n')
 
             if add_tether:
                 for i in range(n_tethers):
@@ -1405,7 +1431,6 @@ class TriLmp():
             self.energy_new = self.estore.energy(self.mesh.trimesh) + self.ke_new + self.pe_new
 
             dh = (self.energy_new- self.energy) / self.T
-            print(dh)
 
             # compute acceptance probability: min(1, np.exp(-de))
             a = 1.0 if dh <= 0 else np.exp(-dh)
@@ -1564,14 +1589,6 @@ class TriLmp():
             print("TRILMP ERROR: Number of equilibration rounds not a multiple of traj_steps. Post equilibration commands will never be read.")
             sys.exit(1)
 
-        if(evaluate_inside_membrane) and (factor_inside_membrane == 0):
-            print("TRILMP ERROR: You want to evaluate inside the membrane but you have provided a factor of 0.")
-            sys.exit(1)
-
-        if(not naive_compression) and (desired_interlayer_distance == 0):
-            print("TRILMP ERROR: Desired interlayer distance for complex compression cannot be zero.")
-            sys.exit(1)
-
         if(ghost_membrane_consumes) and (not evaluate_inside_membrane):
             print("TRILMP ERROR: You want the ghost membrane to consume but you are not setting up the evaluation inside the membrane.")
             sys.exit(1)
@@ -1584,7 +1601,7 @@ class TriLmp():
             postequilibration_lammps_commands = None, seed = 123, current_step = 0,
             step_dependent_protocol = False, step_protocol_commands = None, step_protocol_frequency = 0,
             steps_in_protocol = 0, evaluate_configuration = False, evaluate_inside_membrane = False,
-            factor_inside_membrane=0, naive_compression = True, desired_interlayer_distance=0, 
+            factor_inside_membrane=0, naive_compression = False, desired_interlayer_distance=0, 
             gcmc_by_hand=False, desired_particles_source=0, pure_sink=False, desired_particles_sink=0,
             ghost_membrane_consumes = False, cutoff_consumption = 0, move_membrane=True, force_field_normals = False,
             A_force =0 , B_force =0, linear_force=False, exponential_force = False, concentration_source = 0, 
@@ -1687,9 +1704,6 @@ class TriLmp():
         # of MD steps
         while self.MDsteps<N:
             
-            print(self.MDsteps)
-            print(self.equilibrated)
-
             # get what is the actual simulation time right now
             self.time_force = self.MDsteps * self.traj_steps
 
@@ -2461,7 +2475,7 @@ class TriLmp():
             with open(cptfname, 'wb') as f:
                 pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
                 #json.dump(self, f)
-        print(f'made cp:{cptfname}')
+        #print(f'made cp:{cptfname}')
 
     # SOME UTILITY FUNCTIONS
     # Here we have some minor utility functions to set
@@ -2521,10 +2535,10 @@ def load_checkpoint(name, alt='last'):
 
         if n[0] > n[1]:
             trilmp = read_checkpoint(f'{name}A.cpt')
-            print('reading A')
+            #print('reading A')
         else:
             trilmp = read_checkpoint(f'{name}B.cpt')
-            print('reading B')
+            #print('reading B')
 
     if alt=='explicit':
         trilmp = read_checkpoint(f'{name}')
