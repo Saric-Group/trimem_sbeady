@@ -20,9 +20,7 @@ To run simulations with TriLMP, you will be creating an object of the class ```T
 
 ## Installation guide
 
-TriLMP has been successfully installed and tested in:
-- Linux
-- Mac OS (Sonoma)
+TriLMP has been successfully installed and tested in Linux. Members of the group have managed to install and run TriLMP on MAC OS (Sonoma). However, the installation guide detailed below might not work for such OS. Whenever possible, we recommend the installation in Linux. We are currently working on making the software easy to install in MAC OS.
 
 We suggest installing TriLmp in a conda environment and then install trimem/trilmp as a editable install.
 This allows you to alter trilmp functionality by directly tinkering with the src/trimem/trilmp.py file if needed.
@@ -86,8 +84,8 @@ Depending on what changes you do to the C part of the code, you might need to co
 ### 4. Installing LAMMPS
 
 LAMMPS has to be installed using python shared libraries and some specific packages.
-If you already have LAMMPS you might have to reinstall it. In any case you will have to 
-perform the python install using your Trienv environment as we detail below.
+If you already have LAMMPS you might have to recompile it. In any case you will have to 
+perform the python install using your Trienv environment as we detail below. Saric group members are working on a patched LAMMPS version that should be available soon.
 
 Go back to the directory where you want to have your install folder and get lammps from git by running
 
