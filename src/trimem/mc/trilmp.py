@@ -381,7 +381,10 @@ class TriLmp():
                  multivalency=False,
                  multivalent_linker_length = 0.0,
                  multivalent_linker_stiffness = 0.0,
+                 multivalent_hybridization_length = 0.0,
+                 multivalent_hybridization_stiffness = 0.0,
                  multivalent_bonds            = None,
+                 linkers_per_membrane         = 1.0,
 
                  # EXTENSIONS MMB: ELASTIC MEMBRANE/S-LAYER
                  # (must be initialized in init because affects input file)
@@ -655,7 +658,7 @@ class TriLmp():
         ########################################################################
 
         bond_text="""
-                    special_bonds lj/coul 0.0 0.0 0.0
+                    special_bonds lj/coul 0.0 1.0e-20 1.0e-20
                     bond_style zero nocoeff
                     bond_coeff * * 0.0  """
 
@@ -669,13 +672,16 @@ class TriLmp():
         if multivalency:
             self.multivalent_linker_length=multivalent_linker_length
             self.multivalent_linker_stiffness=multivalent_linker_stiffness
-            n_bond_types+=1
-            n_tethers=self.mesh.x.shape[0]
+            self.multivalent_hybridization_stiffness=multivalent_hybridization_stiffness
+            self.multivalent_hybridization_length=multivalent_hybridization_length
+            n_bond_types+=2 # 2 new bond types, one for the creation of the valency and one for the linkers 
+            n_tethers=self.mesh.x.shape[0]*linkers_per_membrane
             bond_text=f"""
-                        special_bonds lj/coul 0.0 0.0 0.0
+                        special_bonds lj/coul 0.0 1.0e-20 1.0e-20
                         bond_style hybrid zero nocoeff harmonic
                         bond_coeff 1 zero 0.0
                         bond_coeff 2 harmonic {self.multivalent_linker_stiffness} {self.multivalent_linker_length}
+                        bond_coeff 3 harmonic {self.multivalent_hybridization_stiffness} {self.multivalent_hybridization_length}
                     """
 
         ########################################################################
@@ -1969,63 +1975,108 @@ class TriLmp():
                 # SOURCE
                 # --------------------
 
-                # count how many particles are there in the source
-                particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+                if not self.multivalency:
+                    # count how many particles are there in the source
+                    particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
 
-                # add needed particles in source (assuming reactants always last type)
-                to_add = desired_particles_source - particles_source[-1]
+                    # add needed particles in source (assuming reactants always last type)
+                    to_add = desired_particles_source - particles_source[-1]
 
-                # if you need to add particles because there are not enough
-                if to_add>0:
-                    if evaluate_inside_membrane:
-                        if self.heterogeneous_membrane:
-                            self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE')
+                    # if you need to add particles because there are not enough
+                    if to_add>0:
+                        if evaluate_inside_membrane:
+                            if self.heterogeneous_membrane:
+                                self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE')
+                            else:
+                                self.lmp.command(f'create_atoms 3 random {int(to_add)} {i+1} SOURCE')
                         else:
-                            self.lmp.command(f'create_atoms 3 random {int(to_add)} {i+1} SOURCE')
-                    else:
-                        self.lmp.command(f'create_atoms 2 random {int(to_add)} {i+1} SOURCE')
-                if to_add<0:
-                    self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3} compress no')
+                            self.lmp.command(f'create_atoms 2 random {int(to_add)} {i+1} SOURCE')
+                    if to_add<0:
+                        self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3} compress no')
 
-                # --------------------
-                # SINK
-                # --------------------
+                    # --------------------
+                    # SINK
+                    # --------------------
 
-                # count how many particles there are in the sink
-                if not pure_sink:
-                    particles_sink = self.lmp.numpy.extract_compute("countsink", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
-               
-                # if you want to regulate the number of particles in the sink
-                if not pure_sink:
-                    to_delete = desired_particles_sink - particles_sink[-1]
+                    # count how many particles there are in the sink
+                    if not pure_sink:
+                        particles_sink = self.lmp.numpy.extract_compute("countsink", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+                
+                    # if you want to regulate the number of particles in the sink
+                    if not pure_sink:
+                        to_delete = desired_particles_sink - particles_sink[-1]
 
-                # if you need to delete particles because there are too many
-                if to_delete<0:
-                    self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2} compress no')
+                    # if you need to delete particles because there are too many
+                    if to_delete<0:
+                        self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2} compress no')
 
-                # if you need to add particles because there are too few in the sink
-                if to_delete>0:
+                    # if you need to add particles because there are too few in the sink
+                    if to_delete>0:
+                        if evaluate_inside_membrane:
+                            if self.heterogeneous_membrane:
+                                self.lmp.command(f'create_atoms 4 random {int(to_delete)} {i+4} SINK')
+                            else:
+                                self.lmp.command(f'create_atoms 3 random {int(to_delete)} {i+4} SINK')
+                        else:
+                            self.lmp.command(f'create_atoms 2 random {int(to_delete)} {i+4} SINK')
+
+                    # delete particles in sink by default
+                    if pure_sink:
+                        self.lmp.command(f'delete_atoms region SINK compress no')
+
+                    # reevaluate group type 3 for correct integration
                     if evaluate_inside_membrane:
                         if self.heterogeneous_membrane:
+                            self.lmp.command(f'group metabolites type 4')
+                        else:
+                            self.lmp.command(f'group metabolites type 3')
+                    else:
+                        self.lmp.command(f'group metabolites type 2')
+
+                elif self.multivalency:
+
+                    # count how many particles are there in the source
+                    particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+
+                    # CAREFUL HERE!!! add needed particles in source
+                    to_add = desired_particles_source - particles_source[3]
+
+                    # if you need to add particles because there are not enough
+                    if to_add>0:
+                        self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE')
+                    if to_add<0:
+                        self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3} compress no')
+
+                    # --------------------
+                    # SINK
+                    # --------------------
+
+                    # count how many particles there are in the sink
+                    if not pure_sink:
+                        particles_sink = self.lmp.numpy.extract_compute("countsink", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+                
+                    # if you want to regulate the number of particles in the sink
+                    if not pure_sink:
+                        to_delete = desired_particles_sink - particles_sink[3]
+
+                        # if you need to delete particles because there are too many
+                        if to_delete<0:
+                            self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2} compress no')
+
+                        # if you need to add particles because there are too few in the sink
+                        if to_delete>0:
                             self.lmp.command(f'create_atoms 4 random {int(to_delete)} {i+4} SINK')
-                        else:
-                            self.lmp.command(f'create_atoms 3 random {int(to_delete)} {i+4} SINK')
-                    else:
-                        self.lmp.command(f'create_atoms 2 random {int(to_delete)} {i+4} SINK')
+                    # delete particles in sink by default
+                    elif pure_sink:
+                        self.lmp.command(f'delete_atoms region SINK compress no')
 
-                # delete particles in sink by default
-                if pure_sink:
-                    self.lmp.command(f'delete_atoms region SINK compress no')
+                    # reevaluate group for correct integration
+                    self.lmp.command(f'group ssRNA type 4')
+                    self.lmp.command(f'group DNARNA type 5')
 
-                # reevaluate group type 3 for correct integration
-                if evaluate_inside_membrane:
-                    if self.heterogeneous_membrane:
-                        self.lmp.command(f'group metabolites type 4')
-                    else:
-                        self.lmp.command(f'group metabolites type 3')
-                else:
-                    self.lmp.command(f'group metabolites type 2')
-
+                    # to be able to get everything moving
+                    self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
+                    self.lmp.command(f'group bonding union ssDNA ssRNA DNARNA')
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
     ############################################################################
