@@ -2070,13 +2070,19 @@ class TriLmp():
                     elif pure_sink:
                         self.lmp.command(f'delete_atoms region SINK compress no')
 
+                    # introduce here forming and breaking bonds
+                    #self.lmp.command(f'unfix HYBRIDIZATION')
+                    #self.lmp.command(f'unfix HYDROLYSIS')
+                    #self.lmp.command(f'fix HYBRIDIZATION all bond/create 1 3 4 1.0 3 iparam 1 3 jparam 1 5 prob 1.0 123')
+                    #self.lmp.command(f'fix HYDROLYSIS all bond/break 1 3 0.00001 prob 0.000001 456')
+
                     # reevaluate group for correct integration
                     self.lmp.command(f'group ssRNA type 4')
                     self.lmp.command(f'group DNARNA type 5')
 
                     # to be able to get everything moving
                     self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
-                    self.lmp.command(f'group bonding union ssDNA ssRNA DNARNA')
+
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
     ############################################################################
