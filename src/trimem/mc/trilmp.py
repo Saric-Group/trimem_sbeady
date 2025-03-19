@@ -385,6 +385,7 @@ class TriLmp():
                  multivalent_hybridization_stiffness = 0.0,
                  multivalent_bonds            = None,
                  linkers_per_membrane         = 1.0,
+                 Nlinkers                     = 0.0,
 
                  # EXTENSIONS MMB: ELASTIC MEMBRANE/S-LAYER
                  # (must be initialized in init because affects input file)
@@ -675,7 +676,7 @@ class TriLmp():
             self.multivalent_hybridization_stiffness=multivalent_hybridization_stiffness
             self.multivalent_hybridization_length=multivalent_hybridization_length
             n_bond_types+=2 # 2 new bond types, one for the creation of the valency and one for the linkers 
-            n_tethers=self.mesh.x.shape[0]*linkers_per_membrane
+            n_tethers=Nlinkers
             bond_text=f"""
                         special_bonds lj/coul 0.0 1.0e-20 1.0e-20
                         bond_style hybrid zero nocoeff harmonic
@@ -1612,7 +1613,7 @@ class TriLmp():
             ghost_membrane_consumes = False, cutoff_consumption = 0, move_membrane=True, force_field_normals = False,
             A_force =0 , B_force =0, linear_force=False, exponential_force = False, concentration_source = 0, 
             diffusion_coefficient = 1, evaluate_tip = False, tip_range = 0, evaluate_tip_freq = 0,
-            interaction_range = 1.45
+            interaction_range = 1.45, flat_patch = False
         ):
 
         """
@@ -2034,7 +2035,7 @@ class TriLmp():
                         self.lmp.command(f'group metabolites type 2')
 
                 elif self.multivalency:
-
+                    
                     # count how many particles are there in the source
                     particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
 
@@ -2051,37 +2052,38 @@ class TriLmp():
                     # SINK
                     # --------------------
 
-                    # count how many particles there are in the sink
-                    if not pure_sink:
-                        particles_sink = self.lmp.numpy.extract_compute("countsink", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
-                
-                    # if you want to regulate the number of particles in the sink
-                    if not pure_sink:
-                        to_delete = desired_particles_sink - particles_sink[3]
+                    if desired_particles_sink!= -1 and flat_patch == False:
 
-                        # if you need to delete particles because there are too many
-                        if to_delete<0:
-                            self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2} compress no')
+                        # count how many particles there are in the sink
+                        if not pure_sink:
+                            particles_sink = self.lmp.numpy.extract_compute("countsink", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+                    
+                        # if you want to regulate the number of particles in the sink
+                        if not pure_sink:
+                            to_delete = desired_particles_sink - particles_sink[3]
 
-                        # if you need to add particles because there are too few in the sink
-                        if to_delete>0:
-                            self.lmp.command(f'create_atoms 4 random {int(to_delete)} {i+4} SINK')
-                    # delete particles in sink by default
-                    elif pure_sink:
-                        self.lmp.command(f'delete_atoms region SINK compress no')
+                            # if you need to delete particles because there are too many
+                            if to_delete<0:
+                                self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2} compress no')
 
-                    # introduce here forming and breaking bonds
-                    #self.lmp.command(f'unfix HYBRIDIZATION')
-                    #self.lmp.command(f'unfix HYDROLYSIS')
-                    #self.lmp.command(f'fix HYBRIDIZATION all bond/create 1 3 4 1.0 3 iparam 1 3 jparam 1 5 prob 1.0 123')
-                    #self.lmp.command(f'fix HYDROLYSIS all bond/break 1 3 0.00001 prob 0.000001 456')
+                            # if you need to add particles because there are too few in the sink
+                            if to_delete>0:
+                                self.lmp.command(f'create_atoms 4 random {int(to_delete)} {i+4} SINK')
+                        # delete particles in sink by default
+                        elif pure_sink:
+                            self.lmp.command(f'delete_atoms region SINK compress no')
 
                     # reevaluate group for correct integration
                     self.lmp.command(f'group ssRNA type 4')
                     self.lmp.command(f'group DNARNA type 5')
-
-                    # to be able to get everything moving
-                    self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
+                    self.lmp.command(f'group bonding union ssDNA ssRNA DNARNA')
+                    self.lmp.command(f'group wholevesicle union vertices ghost ssDNA DNARNA')
+                    
+                    if not flat_patch:
+                        # to be able to get everything moving
+                        self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
+                    else:
+                        self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
 
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
