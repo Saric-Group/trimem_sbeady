@@ -288,7 +288,7 @@ class TriLmp():
                  bond_type='Edge',      # 'Edge' or 'Area
                  bond_r=2,              # steepness of potential walls (from Trimem)
                  lc0=np.sqrt(3),        # upper onset ('Edge') default will be set below
-                 lc1=1.0,               # lower onset ('Edge')
+                 lc1=1.2,               # lower onset ('Edge')
                  a0=None,               # reference face area ('Area')
 
                  # TRIANGULATED MEMBRANE MECHANICAL PROPERTIES
@@ -1407,17 +1407,17 @@ class TriLmp():
                  self.atom_props = f"""velocity        vertices create {self.T} {np.random.randint(1,9999999)} mom yes dist gaussian"""
                  self.lmp.commands_string(self.atom_props)
                  v = self.lmp.numpy.extract_atom("v")
-                 self.ke= 0.5 * (self.masses[:,np.newaxis]*v).ravel().dot(v.ravel())
+                 self.ke= 0.5 * (v.ravel()).dot(v.ravel())
             else:
                 self.velocities_temp=self.lmp.numpy.extract_atom('v')
-
+            
             # use ke from lammps to get kinetic energy
             self.he = self.estore.energy(self.mesh.trimesh)
             self.energy = self.pe + self.ke + self.he
-
+            
             #run MD trajectory
-            #self.lmp.command(f'run {self.algo_params.traj_steps} post no')
-            self.L.run(self.algo_params.traj_steps)
+            self.lmp.command(f'run {self.algo_params.traj_steps}')
+            #self.L.run(self.algo_params.traj_steps)
 
             #set global energy in lammps
             #self.lmp.fix_external_set_energy_global("ext", self.estore.energy(self.mesh.trimesh))
@@ -1429,11 +1429,11 @@ class TriLmp():
                 pos_alloc=self.lmp.numpy.extract_atom("x")
                 self.mesh.x[:] = pos_alloc[:self.n_vertices]
                 self.beads.positions[:] = pos_alloc[self.n_vertices:self.n_vertices+self.beads.n_beads]
-
+            
             # kinetic and potential energy via LAMMPS
             self.ke_new=self.lmp.numpy.extract_compute("th_ke",LMP_STYLE_GLOBAL,LMP_TYPE_SCALAR)
             self.pe_new=self.lmp.numpy.extract_compute("th_pe", LMP_STYLE_GLOBAL, LMP_TYPE_SCALAR)
-
+            
             # add helfrich energy via Trimem
             self.energy_new = self.estore.energy(self.mesh.trimesh) + self.ke_new + self.pe_new
 
@@ -1447,7 +1447,6 @@ class TriLmp():
                 self.m_acc += 1
                 self.ke=copy(self.ke_new)
                 self.pe=copy(self.pe_new)
-
             else:
                 # reset positions if rejected
                 if not self.beads.n_beads:
@@ -1463,7 +1462,7 @@ class TriLmp():
                 else:
 
                     self.mesh.x[:] = self.mesh_temp[:]
-                    self.beads.positions[:] = self.beads_temp[:]
+                    #self.beads.positions[:] = self.beads_temp[:]
                     atoms_alloc = self.L.atoms
 
                     if self.algo_params.thermal_velocities:
@@ -1613,7 +1612,7 @@ class TriLmp():
             ghost_membrane_consumes = False, cutoff_consumption = 0, move_membrane=True, force_field_normals = False,
             A_force =0 , B_force =0, linear_force=False, exponential_force = False, concentration_source = 0, 
             diffusion_coefficient = 1, evaluate_tip = False, tip_range = 0, evaluate_tip_freq = 0,
-            interaction_range = 1.45, flat_patch = False
+            interaction_range = 1.45, flat_patch = False, alternating_protocol=False,
         ):
 
         """
@@ -1850,12 +1849,20 @@ class TriLmp():
             if (self.equilibrated) and (step_dependent_protocol):
                 # if it is the frequency at which we want to apply the protocol
                 if (self.MDsteps % step_protocol_frequency == 0) and self.MDsteps!= oldsteps:
-                    # if we have not applied all protocol steps
-                    if applied_protocol<steps_in_protocol:
+                    if not alternating_protocol:
+                        # if we have not applied all protocol steps
+                        if applied_protocol<steps_in_protocol:
+                            for command in step_protocol_commands[applied_protocol]:
+                                self.lmp.command(command)
+                            # check what is the protocol step that has been applied
+                            applied_protocol+=1 
+                    else:
                         for command in step_protocol_commands[applied_protocol]:
                             self.lmp.command(command)
-                        # check what is the protocol step that has been applied
-                        applied_protocol+=1 
+                        if applied_protocol ==0:
+                            applied_protocol = 1
+                        else:
+                            applied_protocol = 0
 
                 oldsteps = self.MDsteps
 
