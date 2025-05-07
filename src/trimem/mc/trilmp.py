@@ -287,8 +287,8 @@ class TriLmp():
                  # TRIANGULATED MEMBRANE BONDS
                  bond_type='Edge',      # 'Edge' or 'Area
                  bond_r=2,              # steepness of potential walls (from Trimem)
-                 lc0=np.sqrt(3),        # upper onset ('Edge') default will be set below
-                 lc1=1.2,               # lower onset ('Edge')
+                 lc0=np.sqrt(3),        # upper onset ('Edge') 
+                 lc1=1.0,               # lower onset ('Edge') [sets the scale of the system]
                  a0=None,               # reference face area ('Area')
 
                  # TRIANGULATED MEMBRANE MECHANICAL PROPERTIES
@@ -384,8 +384,7 @@ class TriLmp():
                  multivalent_hybridization_length = 0.0,
                  multivalent_hybridization_stiffness = 0.0,
                  multivalent_bonds            = None,
-                 linkers_per_membrane         = 1.0,
-                 Nlinkers                     = 0.0,
+                 Nlinkers                     = 0,
 
                  # EXTENSIONS MMB: ELASTIC MEMBRANE/S-LAYER
                  # (must be initialized in init because affects input file)
@@ -638,7 +637,7 @@ class TriLmp():
             self.estore = m.EnergyManagerNSR(self.mesh.trimesh, self.eparams, self.init_props)
 
         # save general lengthscale, i.e. membrane bead "size" defined by tether repulsion onset
-        self.l0 = lc1 #1.0 # MMB HARDCODED: LENGTH SCALE OF SYSTEM IS ALWAYS SIGMA = 1
+        self.l0 = lc1
 
         ########################################################################
         #                           BEADS/NANOPARTICLES                        #
@@ -659,7 +658,7 @@ class TriLmp():
         ########################################################################
 
         bond_text="""
-                    special_bonds lj/coul 0.0 1.0e-20 1.0e-20
+                    special_bonds lj/coul 0.0 0.0 0.0
                     bond_style zero nocoeff
                     bond_coeff * * 0.0  """
 
@@ -677,6 +676,8 @@ class TriLmp():
             self.multivalent_hybridization_length=multivalent_hybridization_length
             n_bond_types+=2 # 2 new bond types, one for the creation of the valency and one for the linkers 
             n_tethers=Nlinkers
+
+            # special bonds not exactly zero so that they can be overriden if needed
             bond_text=f"""
                         special_bonds lj/coul 0.0 1.0e-20 1.0e-20
                         bond_style hybrid zero nocoeff harmonic
@@ -1612,9 +1613,11 @@ class TriLmp():
             ghost_membrane_consumes = False, cutoff_consumption = 0, move_membrane=True, force_field_normals = False,
             A_force =0 , B_force =0, linear_force=False, exponential_force = False, concentration_source = 0, 
             diffusion_coefficient = 1, evaluate_tip = False, tip_range = 0, evaluate_tip_freq = 0,
-            interaction_range = 1.45, flat_patch = False, alternating_protocol=False,
+            interaction_range = 1.45, flat_patch = False, alternating_protocol=False, move_reactants =False,
         ):
 
+        print("Starting a TriLMP run...")
+        
         """
         MAIN TRILMP FUNCTION: Combine MD + MC runs
 
@@ -1857,8 +1860,10 @@ class TriLmp():
                             # check what is the protocol step that has been applied
                             applied_protocol+=1 
                     else:
+
                         for command in step_protocol_commands[applied_protocol]:
                             self.lmp.command(command)
+
                         if applied_protocol ==0:
                             applied_protocol = 1
                         else:
@@ -2064,9 +2069,6 @@ class TriLmp():
                         # count how many particles there are in the sink
                         if not pure_sink:
                             particles_sink = self.lmp.numpy.extract_compute("countsink", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
-                    
-                        # if you want to regulate the number of particles in the sink
-                        if not pure_sink:
                             to_delete = desired_particles_sink - particles_sink[3]
 
                             # if you need to delete particles because there are too many
@@ -2076,6 +2078,7 @@ class TriLmp():
                             # if you need to add particles because there are too few in the sink
                             if to_delete>0:
                                 self.lmp.command(f'create_atoms 4 random {int(to_delete)} {i+4} SINK')
+                                
                         # delete particles in sink by default
                         elif pure_sink:
                             self.lmp.command(f'delete_atoms region SINK compress no')
@@ -2092,6 +2095,11 @@ class TriLmp():
                     else:
                         self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
 
+            if self.multivalency:
+                if move_reactants:
+                    self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
+                else:
+                    self.lmp.command(f'group tomove union vertices ssDNA DNARNA')
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
     ############################################################################
