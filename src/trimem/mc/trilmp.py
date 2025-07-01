@@ -104,6 +104,9 @@ from datetime import datetime, timedelta
 from lammps import lammps, PyLammps, LAMMPS_INT, LMP_STYLE_GLOBAL, LMP_VAR_EQUAL, LMP_VAR_ATOM, LMP_TYPE_SCALAR, LMP_TYPE_VECTOR, LMP_TYPE_ARRAY, LMP_SIZE_VECTOR, LMP_SIZE_ROWS, LMP_SIZE_COLS
 from scipy.spatial import KDTree
 
+# for spherical harmonics analysis
+from chemical_gradients.module_sphericalharmonics import *
+
 _sp = u'\U0001f604'
 _nl = '\n'+_sp
 
@@ -1614,25 +1617,22 @@ class TriLmp():
             A_force =0 , B_force =0, linear_force=False, exponential_force = False, concentration_source = 0, 
             diffusion_coefficient = 1, evaluate_tip = False, tip_range = 0, evaluate_tip_freq = 0,
             interaction_range = 1.45, flat_patch = False, alternating_protocol=False, move_reactants =False,
+            compute_amplitudes_on_the_fly = False, upper_threshold_amplitudes=1000, lower_threshold_amplitudes=0,
+            frequency_amplitudes_on_the_fly=100, amplitude_shut_down = None, amplitude_turn_on = None,
+            lmax = 15
         ):
 
         print("Starting a TriLMP run...")
-        
-        """
-        MAIN TRILMP FUNCTION: Combine MD + MC runs
 
-        Parameters:
+        if compute_amplitudes_on_the_fly:
+            famplitudesfly = open('trackamplitudes.dat', 'w')
 
-        - N : number of program steps
-        
+            amplitude_below_threshold = True
+            amplitude_above_threshold = False
 
-        - check_outofrange : check whether single symbiont is too far from membrane
-            Additional parameters:
-                - check_outofrange_freq: how often to check for event
-                - check_outofrange_cutoff: when to consider (distance-wise) event has happened
-
-        - fix_symbionts_near : place symbionts within interaction range of membrane
-        """
+            if upper_threshold_amplitudes<lower_threshold_amplitudes:
+                print("ERROR: Upper threshold is smaller than lower threshold.")
+                exit(1)
 
         # if you want to move the membrane or not
         self.move_membrane = move_membrane
@@ -1680,6 +1680,7 @@ class TriLmp():
         # determine length simulation
         if N==0:
             N=self.algo_params.num_steps
+        # determine algorithm mode
         if self.algo_params.switch_mode=='random':
             self.step = lambda: self.step_random()
         elif self.algo_params.switch_mode=='alternating':
@@ -1688,9 +1689,8 @@ class TriLmp():
             raise ValueError("Wrong switchmode: {}. Use 'random' or 'alternating' ".format(self.algo_params.flip_type))
         
         # counters for MD steps
-        i = -1
+        i, oldsteps = -1, -1
         self.MDsteps = 0
-        oldsteps = -1
 
         if current_step:
             self.MDsteps = current_step
@@ -1772,7 +1772,8 @@ class TriLmp():
 
                     # interaction single symbiont
                     if self.beads.n_beads==1:
-                        coord_bead = self.mesh.x[0]
+                        index_bead = np.where(self.mesh.x[:, 0] == np.max(self.mesh.x[:, 0]))[0]
+                        coord_bead = self.mesh.x[index_bead][0]
                         rtemp      = np.sqrt(coord_bead[0]**2 + coord_bead[1]**2 + coord_bead[2]**2)
                         buffering  = interaction_range
                         sigma_tilde = 0.5*(1+self.beads.bead_sizes[0])
@@ -2100,6 +2101,57 @@ class TriLmp():
                     self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
                 else:
                     self.lmp.command(f'group tomove union vertices ssDNA DNARNA')
+
+            # compute the amplitudes of the spherical harmonics
+            if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and compute_amplitudes_on_the_fly:
+                
+                if self.MDsteps%frequency_amplitudes_on_the_fly==0:
+                    
+                    # compute the amplitudes for the current mesh
+                    alms = amplitudes_on_the_fly(self.mesh.x, lmax = lmax, ntheta = 70, nphi = 140, radius_membrane = 29.72)
+                    
+                    # flag to determine whether we should turn interactions on
+                    turn_on_interactions = True
+
+                    # for the amplitudes that we do not want
+                    # (remember, we only want to excite l = 2)
+                    for l in range(3, lmax):
+                        for m in range(-l, l+1):
+                            # amplitude that we print
+                            absolute_amplitude = np.abs(alms[l, l+m])
+                            print(absolute_amplitude)
+                            # amplitude is below the threshold
+                            if amplitude_below_threshold:
+                                # did it go above the threshold?
+                                if absolute_amplitude>upper_threshold_amplitudes:
+                                    amplitude_below_threshold = False 
+                                    amplitude_above_threshold = True
+                                    turn_on_interactions = False
+                                    if amplitude_shut_down is not None:
+                                        for command in amplitude_shut_down:
+                                            self.lmp.command(command)
+                                    famplitudesfly.writelines(f"{self.MDsteps} OFF\n")
+                                    famplitudesfly.flush()
+                                    break
+                            # we are trying to get the amplitude below threshold
+                            if amplitude_above_threshold:
+                                # if we measure any amplitude that has not relaxed yet
+                                if absolute_amplitude>lower_threshold_amplitudes:
+                                    # we cannot turn the interactions
+                                    turn_on_interactions = False 
+                    
+                    # if all the amplitudes we have measured are below the 
+                    # threshold we have dictated, then we can turn on the interactions
+                    if amplitude_above_threshold and turn_on_interactions:
+                        amplitude_above_threshold = False 
+                        amplitude_below_threshold = True 
+                        famplitudesfly.writelines(f"{self.MDsteps} ON\n")
+                        famplitudesfly.flush()
+                        if amplitude_turn_on is not None:
+                            for command in amplitude_turn_on:
+                                self.lmp.command(command)
+                            
+
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
     ############################################################################
