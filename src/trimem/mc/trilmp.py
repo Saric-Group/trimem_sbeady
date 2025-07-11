@@ -2085,11 +2085,23 @@ class TriLmp():
                             self.lmp.command(f'delete_atoms region SINK compress no')
 
                     # reevaluate group for correct integration
+                    self.lmp.command(f'group ssDNA clear')
+                    self.lmp.command(f'group ssRNA type 3')
+                    # empty ssRNA (metabolite) group, and refill again
+                    self.lmp.command(f'group ssRNA clear')
                     self.lmp.command(f'group ssRNA type 4')
+                    # empty DNARNA (bound) group, and refill again
+                    self.lmp.command(f'group DNARNA clear')
                     self.lmp.command(f'group DNARNA type 5')
+                    # empty bonding group, and refill again
+                    self.lmp.command(f'group bonding clear')
                     self.lmp.command(f'group bonding union ssDNA ssRNA DNARNA')
+                    # empty wholevesicle group, and refill again
+                    self.lmp.command(f'group wholevesicle clear')
                     self.lmp.command(f'group wholevesicle union vertices ghost ssDNA DNARNA')
                     
+                    # clear the group that we are going to be time-integrating
+                    self.lmp.command(f'group tomove clear')
                     if not flat_patch:
                         # to be able to get everything moving
                         self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
@@ -2097,6 +2109,8 @@ class TriLmp():
                         self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
 
             if self.multivalency:
+                # ALWAYS CLEAR THE GROUP BEFORE ADDING!
+                self.lmp.command(f'group tomove clear')
                 if move_reactants:
                     self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
                 else:
@@ -2119,7 +2133,7 @@ class TriLmp():
                         for m in range(-l, l+1):
                             # amplitude that we print
                             absolute_amplitude = np.abs(alms[l, l+m])
-                            print(absolute_amplitude)
+                            #print(absolute_amplitude)
                             # amplitude is below the threshold
                             if amplitude_below_threshold:
                                 # did it go above the threshold?
