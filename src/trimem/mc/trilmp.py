@@ -1624,22 +1624,21 @@ class TriLmp():
 
         print("Starting a TriLMP run...")
 
+        # pertains to 'division_fluctuations' project
         if compute_amplitudes_on_the_fly:
+            # open file to save information
             famplitudesfly = open('trackamplitudes.dat', 'w')
-
+            # reset thresholds
             amplitude_below_threshold = True
             amplitude_above_threshold = False
-
             if upper_threshold_amplitudes<lower_threshold_amplitudes:
                 print("ERROR: Upper threshold is smaller than lower threshold.")
                 exit(1)
 
         # if you want to move the membrane or not
         self.move_membrane = move_membrane
-
         # if you want to apply a force field normal to the membrane
         self.force_field_normals = force_field_normals
-
         # if you want that force field to be linear in x, f(x) = A*x + B
         self.linear_force = linear_force
         self.A_force = A_force
@@ -1668,12 +1667,10 @@ class TriLmp():
         # clear up this file
         temp_file = open(f'{self.output_params.output_prefix}_system.dat','w')
         temp_file.close()
-
         # clear up this file
         temp_file = open(f'{self.output_params.output_prefix}_performance.dat','w')
         temp_file.close()
         # -------------------------------------------------
-        
         # check whether there is any initialization error
         self.raise_errors_run(integrators_defined, check_outofrange, check_outofrange_freq, check_outofrange_cutoff, fix_symbionts_near, evaluate_inside_membrane, factor_inside_membrane, naive_compression, desired_interlayer_distance, ghost_membrane_consumes)
 
@@ -2086,7 +2083,7 @@ class TriLmp():
 
                     # reevaluate group for correct integration
                     self.lmp.command(f'group ssDNA clear')
-                    self.lmp.command(f'group ssRNA type 3')
+                    self.lmp.command(f'group ssDNA type 3')
                     # empty ssRNA (metabolite) group, and refill again
                     self.lmp.command(f'group ssRNA clear')
                     self.lmp.command(f'group ssRNA type 4')
@@ -2099,22 +2096,9 @@ class TriLmp():
                     # empty wholevesicle group, and refill again
                     self.lmp.command(f'group wholevesicle clear')
                     self.lmp.command(f'group wholevesicle union vertices ghost ssDNA DNARNA')
-                    
-                    # clear the group that we are going to be time-integrating
+                    # empty tomove group, and refill again (integrator applies here)
                     self.lmp.command(f'group tomove clear')
-                    if not flat_patch:
-                        # to be able to get everything moving
-                        self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
-                    else:
-                        self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
-
-            if self.multivalency:
-                # ALWAYS CLEAR THE GROUP BEFORE ADDING!
-                self.lmp.command(f'group tomove clear')
-                if move_reactants:
                     self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
-                else:
-                    self.lmp.command(f'group tomove union vertices ssDNA DNARNA')
 
             # compute the amplitudes of the spherical harmonics
             if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and compute_amplitudes_on_the_fly:

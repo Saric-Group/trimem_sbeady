@@ -1,4 +1,4 @@
-name: trilmp
+name: TrienvMMB
 channels:
   - conda-forge
 dependencies:
