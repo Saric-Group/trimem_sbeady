@@ -430,6 +430,10 @@ class TriLmp():
         #                            SOME MINOR PREREQUESITES                  #
         ########################################################################
 
+        # save alternating checkpoints
+        self.saveA = True 
+        self.saveB = False 
+
         # initialization of (some) object attributes
         self.initialize           = initialize
         self.debug_mode           = debug_mode
@@ -2341,8 +2345,16 @@ class TriLmp():
                 #with open(f"checkpoints/ckpt_MDs_{self.MDsteps}_.pickle", 'wb') as f:
                 #    pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
                 # better to have a single pickle!
-                with open(f"ckpt.pickle", 'wb') as f:
-                    pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                if self.saveA:
+                    self.saveA = False
+                    self.saveB = True
+                    with open(f"ckptA.pickle", 'wb') as f:
+                        pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                elif self.saveB:
+                    self.saveA = True 
+                    self.saveB = False
+                    with open(f"ckptB.pickle", 'wb') as f:
+                        pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
         
         # MMB open to clean-up
         if  self.MDsteps ==1:
@@ -2561,7 +2573,7 @@ class TriLmp():
                 self.counter["flip"],
                 self.beads.n_beads,
                 self.beads.n_bead_types,
-                self.beads.positions,
+                self.lmp.numpy.extract_atom('x')[self.n_vertices:, :],
                 self.lmp.numpy.extract_atom('v')[self.n_vertices:, :],
                 self.beads.bead_sizes,
                 self.beads.types,
