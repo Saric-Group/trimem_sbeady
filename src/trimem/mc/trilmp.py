@@ -683,7 +683,7 @@ class TriLmp():
             self.multivalent_hybridization_length=multivalent_hybridization_length
             n_bond_types+=2 # 2 new bond types, one for the creation of the valency and one for the linkers 
             n_tethers=Nlinkers
-
+            self.Nlinkers = Nlinkers
             # special bonds not exactly zero so that they can be overriden if needed
             bond_text=f"""
                         special_bonds lj/coul 0.0 1.0e-20 1.0e-20
@@ -1623,7 +1623,7 @@ class TriLmp():
             interaction_range = 1.45, flat_patch = False, alternating_protocol=False, move_reactants =False,
             compute_amplitudes_on_the_fly = False, upper_threshold_amplitudes=1000, lower_threshold_amplitudes=0,
             frequency_amplitudes_on_the_fly=100, amplitude_shut_down = None, amplitude_turn_on = None,
-            lmax = 15
+            lmax = 15, carpet = False
         ):
 
         print("Starting a TriLMP run...")
@@ -1639,6 +1639,9 @@ class TriLmp():
                 print("ERROR: Upper threshold is smaller than lower threshold.")
                 exit(1)
 
+        # whether you are doing rolling simulations or not
+        # matters because it will update the moving group
+        self.carpet = carpet
         # if you want to move the membrane or not
         self.move_membrane = move_membrane
         # if you want to apply a force field normal to the membrane
@@ -2085,22 +2088,28 @@ class TriLmp():
                         elif pure_sink:
                             self.lmp.command(f'delete_atoms region SINK compress no')
 
-                    # reevaluate group for correct integration
-                    self.lmp.command(f'group ssDNA clear')
-                    self.lmp.command(f'group ssDNA type 3')
-                    # empty ssRNA (metabolite) group, and refill again
-                    self.lmp.command(f'group ssRNA clear')
-                    self.lmp.command(f'group ssRNA type 4')
-                    # empty DNARNA (bound) group, and refill again
-                    self.lmp.command(f'group DNARNA clear')
-                    self.lmp.command(f'group DNARNA type 5')
-                    # empty bonding group, and refill again
-                    self.lmp.command(f'group bonding clear')
-                    self.lmp.command(f'group bonding union ssDNA ssRNA DNARNA')
-                    # empty wholevesicle group, and refill again
-                    self.lmp.command(f'group wholevesicle clear')
-                    self.lmp.command(f'group wholevesicle union vertices ghost ssDNA DNARNA')
-                    # empty tomove group, and refill again (integrator applies here)
+            # reevaluate groups for correct integration
+            if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and self.multivalency:
+
+                # reevaluate group for correct integration
+                self.lmp.command(f'group ssDNA clear')
+                self.lmp.command(f'group ssDNA type 3')
+                # empty ssRNA (metabolite) group, and refill again
+                self.lmp.command(f'group ssRNA clear')
+                self.lmp.command(f'group ssRNA type 4')
+                # empty DNARNA (bound) group, and refill again
+                self.lmp.command(f'group DNARNA clear')
+                self.lmp.command(f'group DNARNA type 5')
+                # empty wholevesicle group, and refill again
+                self.lmp.command(f'group wholevesicle clear')
+                self.lmp.command(f'group wholevesicle union vertices ghost ssDNA DNARNA')
+                # empty tomove group, and refill again (integrator applies here)
+                if self.carpet:
+                    self.lmp.command(f'group boundRNA clear')
+                    self.lmp.command(f'group boundRNA type 6')
+                    self.lmp.command(f'group tomove clear')
+                    self.lmp.command(f'group tomove union vertices ssDNA DNARNA')
+                else:
                     self.lmp.command(f'group tomove clear')
                     self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
 
