@@ -1745,11 +1745,16 @@ class TriLmp():
                 # get the coordinates of particles
                 coord_temp = pos_alloc[particle_indexes]
                 distances = np.sqrt(coord_temp[:, 0]**2 + coord_temp[:, 1]**2 + coord_temp[:, 2]**2)
-                below_threshold = np.where(distances<=halt_distance)
+                below_threshold = np.where(distances<=halt_distance)[0]
                 if len(below_threshold)>0:
                     print("Halting simulation due to threshold violation.")
                     fhalt = open('haltedsimulation.dat', 'w')
-                    fhalt.writelines(f'Simulation halted at {i}')
+                    fhalt.writelines(f'Simulation halted at {i}\n')
+                    fhalt.writelines(f'Len below threshold: {len(below_threshold)}\n')
+                    fhalt.writelines(f'Index below threshold: ')
+                    for qqq in range(len(below_threshold)):
+                        fhalt.writelines(f"{below_threshold[qqq]} ")
+                    fhalt.writelines("\n")
                     fhalt.close()
                     sys.exit(1)
 
