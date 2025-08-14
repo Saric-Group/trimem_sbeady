@@ -1756,6 +1756,13 @@ class TriLmp():
                         fhalt.writelines(f"{below_threshold[qqq]} ")
                     fhalt.writelines("\n")
                     fhalt.close()
+
+                    # save the crashed configuration
+                    self.lmp.command('write_data haltedlast.config')
+                    # write a final picklet
+                    with open(f"halt.pickle", 'wb') as f:
+                        pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                    # exit from the simulation
                     sys.exit(1)
 
             # if applicable, define the tip group
