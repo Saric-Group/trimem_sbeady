@@ -1623,7 +1623,7 @@ class TriLmp():
             interaction_range = 1.45, flat_patch = False, alternating_protocol=False, move_reactants =False,
             compute_amplitudes_on_the_fly = False, upper_threshold_amplitudes=1000, lower_threshold_amplitudes=0,
             frequency_amplitudes_on_the_fly=100, amplitude_shut_down = None, amplitude_turn_on = None,
-            lmax = 15, carpet = False
+            lmax = 15, carpet = False, halt_based_on_distance = False, halt_distance = 0
         ):
 
         print("Starting a TriLMP run...")
@@ -1731,6 +1731,27 @@ class TriLmp():
 
             # check if simulation must stop
             self.halt_symbiont_simulation(i, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
+
+            # stop simulation is membrane gets close to something
+            if halt_based_on_distance and self.MDsteps>self.equilibration_rounds:
+                                
+                # extract the particle coordinates
+                pos_alloc=self.lmp.numpy.extract_atom("x")
+                # extract the atom types --> 
+                # this should give me the IDs in a consistent manner
+                types_atoms = self.lmp.numpy.extract_atom("type")
+                # get the indexes of the vertices
+                particle_indexes = np.where(types_atoms == 1)[0]
+                # get the coordinates of particles
+                coord_temp = pos_alloc[particle_indexes]
+                distances = np.sqrt(coord_temp[:, 0]**2 + coord_temp[:, 1]**2 + coord_temp[:, 2]**2)
+                below_threshold = np.where(distances<=halt_distance)
+                if len(below_threshold)>0:
+                    print("Halting simulation due to threshold violation.")
+                    fhalt = open('haltedsimulation.dat', 'w')
+                    fhalt.writelines(f'Simulation halted at {i}')
+                    fhalt.close()
+                    sys.exit(1)
 
             # if applicable, define the tip group
             if evaluate_tip:
@@ -2105,6 +2126,7 @@ class TriLmp():
                 self.lmp.command(f'group wholevesicle union vertices ghost ssDNA DNARNA')
                 # empty tomove group, and refill again (integrator applies here)
                 if self.carpet:
+                    # ssRNA and the boundRNA CANNOT MOVE!!!
                     self.lmp.command(f'group boundRNA clear')
                     self.lmp.command(f'group boundRNA type 6')
                     self.lmp.command(f'group tomove clear')
