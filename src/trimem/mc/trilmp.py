@@ -2143,6 +2143,28 @@ class TriLmp():
                     self.lmp.command(f'group boundRNA type 6')
                     self.lmp.command(f'group tomove clear')
                     self.lmp.command(f'group tomove union vertices ssDNA DNARNA')
+
+
+                    # ---------------------------------
+                    # detect unbinding and halt the simulation
+                    types_atoms = self.lmp.numpy.extract_atom("type")
+                    # get the indexes of the vertices
+                    particle_indexes = np.where(types_atoms == 5)[0]
+                    if len(particle_indexes)==0:
+                        print("Vesicle has detached")
+                        fhalt = open('haltedsimulation.dat', 'w')
+                        fhalt.writelines(f'Simulation halted at {i} because no DNA-RNA hybrid\n')
+                        fhalt.writelines("\n")
+                        fhalt.close()
+
+                        # save the crashed configuration
+                        self.lmp.command('write_data haltedlast.config')
+                        # write a final picklet
+                        with open(f"halt.pickle", 'wb') as f:
+                            pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                        # exit from the simulation
+                        sys.exit(1)
+
                 else:
                     self.lmp.command(f'group tomove clear')
                     self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
