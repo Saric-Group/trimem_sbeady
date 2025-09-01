@@ -2141,6 +2141,8 @@ class TriLmp():
                     # ssRNA and the boundRNA CANNOT MOVE!!!
                     self.lmp.command(f'group boundRNA clear')
                     self.lmp.command(f'group boundRNA type 6')
+                    self.lmp.command(f'group burnedRNA clear')
+                    self.lmp.command(f'group burnedRNA type 7')
                     self.lmp.command(f'group tomove clear')
                     self.lmp.command(f'group tomove union vertices ssDNA DNARNA')
 
