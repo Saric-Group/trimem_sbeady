@@ -2145,6 +2145,8 @@ class TriLmp():
                     self.lmp.command(f'group burnedRNA type 7')
                     self.lmp.command(f'group tomove clear')
                     self.lmp.command(f'group tomove union vertices ssDNA DNARNA')
+                    self.lmp.command(f'group printgroup clear')
+                    self.lmp.command(f'group printgroup union vertices ghost ssDNA DNARNA boundRNA burnedRNA')
 
 
                     # ---------------------------------
