@@ -1623,7 +1623,8 @@ class TriLmp():
             interaction_range = 1.45, flat_patch = False, alternating_protocol=False, move_reactants =False,
             compute_amplitudes_on_the_fly = False, upper_threshold_amplitudes=1000, lower_threshold_amplitudes=0,
             frequency_amplitudes_on_the_fly=100, amplitude_shut_down = None, amplitude_turn_on = None,
-            lmax = 15, carpet = False, halt_based_on_distance = False, halt_distance = 0
+            lmax = 15, carpet = False, halt_based_on_distance = False, halt_distance = 0,
+            flat_multivalency = False
         ):
 
         print("Starting a TriLMP run...")
@@ -1639,6 +1640,8 @@ class TriLmp():
                 print("ERROR: Upper threshold is smaller than lower threshold.")
                 exit(1)
 
+        # whether we are running the patch with multivalency
+        self.flat_multivalency = flat_multivalency
         # whether you are doing rolling simulations or not
         # matters because it will update the moving group
         self.carpet = carpet
@@ -2169,6 +2172,9 @@ class TriLmp():
                         # exit from the simulation
                         sys.exit(1)
 
+                if self.flat_multivalency:
+                    self.lmp.command(f'group tomove clear')
+                    self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
                 else:
                     self.lmp.command(f'group tomove clear')
                     self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
