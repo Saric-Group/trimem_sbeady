@@ -422,7 +422,8 @@ class TriLmp():
                  angle_triplets=None,  # Dictionary with structure {'angle_type':[[A, B, C], [D, E, F]]}
 
                  # pickling parameters
-                 generate_pickles = True
+                 generate_pickles = True,
+                 restart_file = None
                  ):
 
 
@@ -634,18 +635,18 @@ class TriLmp():
             self.init_props.bending = self.initial_state.bending
             self.init_props.tethering = self.initial_state.tethering
 
-            #print(f"PASSING AREA: {area} INITIAL STATE AREA: {self.initial_state.area} INITIAL PROPS AREA: {self.initial_props.area}")
-            #print(f"PASSING VOLUME: {volume} INITIAL STATE VOLUME: {self.initial_state.volume} INITIAL PROPS VOLUME: {self.initial_props.volume}")
-            #print(f"PASSING CURVATURE: {curvature} INITIAL STATE CURVATURE: {self.initial_state.curvature} INITIAL PROPS CURVATURE: {self.initial_props.curvature}")
-            #print(f"PASSING BENDING: {bending} INITIAL STATE BENDING: {self.initial_state.bending} INITIAL PROPS BENDING: {self.initial_props.bending}")
-            #print(f"PASSING TETHERING: {tethering} INITIAL STATE BENDING: {self.initial_state.tethering} INITIAL PROPS TETHERING: {self.initial_props.tethering}")
+            #print(f"PASSING AREA: {area} INITIAL STATE AREA: {self.initial_state.area} INITIAL PROPS AREA: {self.init_props.area}")
+            #print(f"PASSING VOLUME: {volume} INITIAL STATE VOLUME: {self.initial_state.volume} INITIAL PROPS VOLUME: {self.init_props.volume}")
+            #print(f"PASSING CURVATURE: {curvature} INITIAL STATE CURVATURE: {self.initial_state.curvature} INITIAL PROPS CURVATURE: {self.init_props.curvature}")
+            #print(f"PASSING BENDING: {bending} INITIAL STATE BENDING: {self.initial_state.bending} INITIAL PROPS BENDING: {self.init_props.bending}")
+            #print(f"PASSING TETHERING: {tethering} INITIAL STATE BENDING: {self.initial_state.tethering} INITIAL PROPS TETHERING: {self.init_props.tethering}")
 
             #recreate energy manager
             self.estore = m.EnergyManagerNSR(self.mesh.trimesh, self.eparams, self.init_props)
 
         # save general lengthscale, i.e. membrane bead "size" defined by tether repulsion onset
         self.l0 = lc1
-
+        
         ########################################################################
         #                           BEADS/NANOPARTICLES                        #
         ########################################################################
@@ -659,6 +660,13 @@ class TriLmp():
                          bead_v,
                          bead_sizes,
                          bead_types)
+
+        #print('n_beads', self.beads.n_beads)
+        #print('n_bead_types', self.beads.n_bead_types)
+        #print('positions', self.beads.positions, len(self.beads.positions))
+        #print('velocities', self.beads.velocities, len(self.beads.velocities))
+        #print('types', self.beads.types, len(self.beads.types))
+        #print('sizes', self.beads.bead_sizes, len(self.beads.bead_sizes))
 
         ########################################################################
         #                             EXTENSION: TETHERS                       #
@@ -799,40 +807,74 @@ class TriLmp():
         # pass boundary conditions - periodic bc are useless (triangulated membrane does not do well across boundary)
         boundary_string = self.parse_boundary(periodic)
 
-        # basic system initialization
-        basic_system = dedent(f"""\
-            units lj
-            dimension 3
-            package omp 0
-            boundary {boundary_string}
+        if restart_file is None:
+            # basic system initialization
+            basic_system = dedent(f"""\
+                units lj
+                dimension 3
+                package omp 0
+                boundary {boundary_string}
 
-            atom_style    {atom_style_text}
-            atom_modify sort 0 0.0
+                atom_style    {atom_style_text}
+                atom_modify sort 0 0.0
 
-            region box block {self.algo_params.box[0]} {self.algo_params.box[1]} {self.algo_params.box[2]} {self.algo_params.box[3]} {self.algo_params.box[4]} {self.algo_params.box[5]}
-            create_box {total_particle_types} box {bond_dihedral_text} {angle_style_text} extra/bond/per/atom 100 extra/special/per/atom 100
+                region box block {self.algo_params.box[0]} {self.algo_params.box[1]} {self.algo_params.box[2]} {self.algo_params.box[3]} {self.algo_params.box[4]} {self.algo_params.box[5]}
+                create_box {total_particle_types} box {bond_dihedral_text} {angle_style_text} extra/bond/per/atom 100 extra/special/per/atom 100
 
-            run_style verlet
+                run_style verlet
 
-            # TriMEM computation of the forces
-            fix ext all external pf/callback 1 1
+                # TriMEM computation of the forces
+                fix ext all external pf/callback 1 1
 
-            timestep {self.algo_params.step_size}
+                timestep {self.algo_params.step_size}
 
-            {block(bond_text)}
+                {block(bond_text)}
 
-            dielectric  1.0
-            compute th_ke all ke
-            compute th_pe all pe pair bond
-            
-            thermo {self.algo_params.traj_steps}
-            thermo_style custom c_th_pe c_th_ke
-            thermo_modify norm no
+                dielectric  1.0
+                compute th_ke all ke
+                compute th_pe all pe pair bond
+                
+                thermo {self.algo_params.traj_steps}
+                thermo_style custom c_th_pe c_th_ke
+                thermo_modify norm no
 
-            #info styles compute out log
-            echo screen
+                #info styles compute out log
+                echo screen
 
-        """)
+            """)
+        elif (restart_file is not None) and (initialize is False):
+            # basic system initialization
+            basic_system = dedent(f"""\
+                units lj
+                dimension 3
+                package omp 0
+                boundary {boundary_string}
+
+                atom_style    {atom_style_text}
+                atom_modify sort 0 0.0
+
+                read_restart {restart_file}
+                run_style verlet
+
+                # TriMEM computation of the forces
+                fix ext all external pf/callback 1 1
+
+                timestep {self.algo_params.step_size}
+
+                {block(bond_text)}
+
+                dielectric  1.0
+                compute th_ke all ke
+                compute th_pe all pe pair bond
+                
+                thermo {self.algo_params.traj_steps}
+                thermo_style custom c_th_pe c_th_ke
+                thermo_modify norm no
+
+                #info styles compute out log
+                echo screen
+
+            """)
 
         # introduce preamble/basic system description in lammps
         self.lmp.commands_string(basic_system)
@@ -846,154 +888,160 @@ class TriLmp():
         self.edges   = np.unique(self.edges,axis=0)
         self.n_edges = self.edges.shape[0]
 
-        # create (re)initialization file
-        with open('sim_setup.in', 'w') as f:
+        # if no restart file has been provided
+        if restart_file is None and initialize:
 
-            f.write('\n\n')
-            f.write(f'{self.mesh.x.shape[0]+self.beads.n_beads+self.n_slayer+self.fix_rigid_symbiont_nparticles} atoms\n')
-            f.write(f'{num_particle_types} atom types\n')
-            f.write(f'{self.edges.shape[0]+n_tethers+self.n_slayer_bonds} bonds\n')
-            print("ADDING EDGES: ", self.edges.shape[0]+n_tethers)
-            f.write(f'{n_bond_types} bond types\n\n')
+            # create initialization file
+            with open('sim_setup.in', 'w') as f:
 
-            # include angles if it applies
-            if add_angles:
-                f.write(f'{angles_total} angles\n')
-                f.write(f'{n_angle_types} angle types\n\n')
+                f.write('\n\n')
+                f.write(f'{self.mesh.x.shape[0]+self.beads.n_beads+self.n_slayer+self.fix_rigid_symbiont_nparticles} atoms\n')
+                f.write(f'{num_particle_types} atom types\n')
+                f.write(f'{self.edges.shape[0]+n_tethers+self.n_slayer_bonds} bonds\n')
+                print("ADDING EDGES: ", self.edges.shape[0]+n_tethers)
+                f.write(f'{n_bond_types} bond types\n\n')
 
-            # include dihedrals for s-layer
-            if self.slayer:
-                f.write(f'{self.n_slayer_dihedrals} dihedrals\n')
-                f.write(f'1 dihedral types\n\n')
+                # include angles if it applies
+                if add_angles:
+                    f.write(f'{angles_total} angles\n')
+                    f.write(f'{n_angle_types} angle types\n\n')
 
-            # particle masses
-            f.write('Masses\n\n')
-            for part_types in range(num_particle_types):
-                f.write(f'{part_types+1} {self.mass_particle_type[part_types]}\n')
-            f.write('\n')
+                # include dihedrals for s-layer
+                if self.slayer:
+                    f.write(f'{self.n_slayer_dihedrals} dihedrals\n')
+                    f.write(f'1 dihedral types\n\n')
 
-            # [COORDINATES] STANDARD SIMULATION SET-UP: only membrane and potentially nanoparticles
-            if (not self.slayer) and (not self.fix_rigid_symbiont) and (not heterogeneous_membrane) and (not add_angles):
-                f.write(f'Atoms # hybrid\n\n')
-                for i in range(self.n_vertices):
-                    f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+                # particle masses
+                f.write('Masses\n\n')
+                for part_types in range(num_particle_types):
+                    f.write(f'{part_types+1} {self.mass_particle_type[part_types]}\n')
+                f.write('\n')
 
-                # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
-                if self.beads.n_beads:
-                    for i in range(self.beads.n_beads):
-                        f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
-        
-            elif add_angles:
-                f.write(f'Atoms # full\n\n')
-                for i in range(self.n_vertices):
-                    f.write(f'{i + 1} 0 1 1.0 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} \n')
+                # [COORDINATES] STANDARD SIMULATION SET-UP: only membrane and potentially nanoparticles
+                if (not self.slayer) and (not self.fix_rigid_symbiont) and (not heterogeneous_membrane) and (not add_angles):
+                    f.write(f'Atoms # hybrid\n\n')
+                    for i in range(self.n_vertices):
+                        f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
 
-                # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
-                if self.beads.n_beads:
-                    for i in range(self.beads.n_beads):
-                        f.write(f'{self.n_vertices+1+i} 0 {int(self.beads.types[i])} 0 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} \n')
+                    # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
+                    if self.beads.n_beads:
+                        print('NBEADS: ', self.beads.n_beads)
+                        print('TOTAL: ', len(self.beads.types))
+                        print(self.beads.types)
+                        for i in range(self.beads.n_beads):
+                            f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
+            
+                elif add_angles:
+                    f.write(f'Atoms # full\n\n')
+                    for i in range(self.n_vertices):
+                        f.write(f'{i + 1} 0 1 1.0 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} \n')
 
-            # [COORDINATES] EXTENSION: SIMULATION WITH AN SLAYER
-            elif self.slayer:
-                f.write(f'Atoms # full\n\n')
-                # membrane vertices (type 1)
-                for i in range(self.n_vertices):
-                    f.write(f'{i + 1} 0 1 1.0 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} \n')
-                # slayer vertices (type 2)
-                for i in range(self.n_slayer):
-                    f.write(f'{self.n_vertices+i+1} 0 2 1.0 {self.slayer_points[i, 0]} {self.slayer_points[i, 1]} {self.slayer_points[i, 2]}\n')
+                    # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
+                    if self.beads.n_beads:
+                        for i in range(self.beads.n_beads):
+                            f.write(f'{self.n_vertices+1+i} 0 {int(self.beads.types[i])} 0 {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} \n')
 
-            # [COORDINATES] EXTENSION: SIMULATION WITH RIGID SYMBIONTS
-            elif self.fix_rigid_symbiont:
+                # [COORDINATES] EXTENSION: SIMULATION WITH AN SLAYER
+                elif self.slayer:
+                    f.write(f'Atoms # full\n\n')
+                    # membrane vertices (type 1)
+                    for i in range(self.n_vertices):
+                        f.write(f'{i + 1} 0 1 1.0 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} \n')
+                    # slayer vertices (type 2)
+                    for i in range(self.n_slayer):
+                        f.write(f'{self.n_vertices+i+1} 0 2 1.0 {self.slayer_points[i, 0]} {self.slayer_points[i, 1]} {self.slayer_points[i, 2]}\n')
 
-                f.write(f'Atoms # hybrid\n\n')
+                # [COORDINATES] EXTENSION: SIMULATION WITH RIGID SYMBIONTS
+                elif self.fix_rigid_symbiont:
+
+                    f.write(f'Atoms # hybrid\n\n')
+                    # membrane particles are type 1
+                    for i in range(self.n_vertices):
+                        f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+                    # symbiont/nanoparticles particles are type 2
+                    for i in range(self.fix_rigid_symbiont_nparticles):
+                        f.write(f'{self.n_vertices + i + 1} 2  {self.fix_rigid_symbiont_coordinates[i, 0]} {self.fix_rigid_symbiont_coordinates[i, 1]} {self.fix_rigid_symbiont_coordinates[i, 2]} 1 1.0 \n')
+
+                # [COORDINATES] EXTENSION: SIMULATION WITH HETEROGENEOUS (2 TYPE) MEMBRANE
+                elif heterogeneous_membrane:
+                    f.write(f'Atoms # hybrid\n\n')
+                    for i in range(self.n_vertices):
+                        if i in heterogeneous_membrane_id:
+                            f.write(f'{i + 1} 2 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+                        else:
+                            f.write(f'{i + 1} 1 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+
+                    if self.beads.n_beads:
+                        if self.beads.n_bead_types>1:
+                            for i in range(self.beads.n_beads):
+                                f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
+                        else:
+                            for i in range(self.beads.n_beads):
+                                f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
+
+                # [VELOCITIES]
+                f.write(f'\nVelocities \n\n')
                 # membrane particles are type 1
                 for i in range(self.n_vertices):
-                    f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
-                # symbiont/nanoparticles particles are type 2
-                for i in range(self.fix_rigid_symbiont_nparticles):
-                    f.write(f'{self.n_vertices + i + 1} 2  {self.fix_rigid_symbiont_coordinates[i, 0]} {self.fix_rigid_symbiont_coordinates[i, 1]} {self.fix_rigid_symbiont_coordinates[i, 2]} 1 1.0 \n')
+                    f.write(f'{i + 1} 0.0 0.0 0.0 \n')
 
-            # [COORDINATES] EXTENSION: SIMULATION WITH HETEROGENEOUS (2 TYPE) MEMBRANE
-            elif heterogeneous_membrane:
-                f.write(f'Atoms # hybrid\n\n')
-                for i in range(self.n_vertices):
-                    if i in heterogeneous_membrane_id:
-                        f.write(f'{i + 1} 2 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
-                    else:
-                        f.write(f'{i + 1} 1 {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
-
+                # bead velocities
                 if self.beads.n_beads:
-                    if self.beads.n_bead_types>1:
+                    if np.any(self.beads.velocities):
                         for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
+                            f.write(f'{self.n_vertices+1+i} {self.beads.velocities[i, 0]} {self.beads.velocities[i, 1]} {self.beads.velocities[i, 2]}\n')
                     else:
                         for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} {self.beads.types[i]} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 1.0\n')
-
-            # [VELOCITIES]
-            f.write(f'\nVelocities \n\n')
-            # membrane particles are type 1
-            for i in range(self.n_vertices):
-                f.write(f'{i + 1} 0.0 0.0 0.0 \n')
-
-            # bead velocities
-            if self.beads.n_beads:
-                if np.any(self.beads.velocities):
-                    for i in range(self.beads.n_beads):
-                        f.write(f'{self.n_vertices+1+i} {self.beads.velocities[i, 0]} {self.beads.velocities[i, 1]} {self.beads.velocities[i, 2]}\n')
+                            f.write(f'{self.n_vertices+1+i} {0} {0} {0}\n')
+                # [BONDS]
+                if self.slayer == False:
+                    f.write(f'\nBonds # zero special\n\n')
                 else:
-                    for i in range(self.beads.n_beads):
-                        f.write(f'{self.n_vertices+1+i} {0} {0} {0}\n')
-            # [BONDS]
-            if self.slayer == False:
-                f.write(f'\nBonds # zero special\n\n')
-            else:
-                f.write(f'\nBonds # hybrid\n\n')
+                    f.write(f'\nBonds # hybrid\n\n')
 
-            # [BONDS] first type of bond -- for the fluid membrane
-            for i in range(self.edges.shape[0]):
-                f.write(f'{i + 1} 1 {self.edges[i, 0] + 1} {self.edges[i, 1] + 1}\n')
-            # [BONDS] second type of bond -- for the slayer
-            for i in range(self.n_slayer_bonds):
-                f.write(f'{self.edges.shape[0] + i + 1} 2 {self.slayer_bonds[i, 0] + self.n_vertices} {self.slayer_bonds[i, 1] + self.n_vertices}\n')
+                # [BONDS] first type of bond -- for the fluid membrane
+                for i in range(self.edges.shape[0]):
+                    f.write(f'{i + 1} 1 {self.edges[i, 0] + 1} {self.edges[i, 1] + 1}\n')
+                # [BONDS] second type of bond -- for the slayer
+                for i in range(self.n_slayer_bonds):
+                    f.write(f'{self.edges.shape[0] + i + 1} 2 {self.slayer_bonds[i, 0] + self.n_vertices} {self.slayer_bonds[i, 1] + self.n_vertices}\n')
 
-            if multivalency:
-                for i in range(len(multivalent_bonds)):
-                    f.write(f'{self.edges.shape[0] + i + 1} 2 {multivalent_bonds[i, 0]+1} {multivalent_bonds[i, 1]+1}\n')
+                if multivalency:
+                    for i in range(len(multivalent_bonds)):
+                        f.write(f'{self.edges.shape[0] + i + 1} 2 {multivalent_bonds[i, 0]+1} {multivalent_bonds[i, 1]+1}\n')
 
-            if add_tether:
-                for i in range(n_tethers):
-                    d_temp=10^6
-                    h=0
-                    for j in range(self.n_vertices):
-                        d_temp2=np.sum((self.mesh.x[j,:]-self.beads.positions[0,:])**2)
-                        if d_temp>d_temp2:
-                            d_temp=d_temp2
-                            h=j
+                if add_tether:
+                    for i in range(n_tethers):
+                        d_temp=10^6
+                        h=0
+                        for j in range(self.n_vertices):
+                            d_temp2=np.sum((self.mesh.x[j,:]-self.beads.positions[0,:])**2)
+                            if d_temp>d_temp2:
+                                d_temp=d_temp2
+                                h=j
 
-                    f.write(f'{self.edges.shape[0]+1+i} 2 {h+1} {self.n_vertices+1+i}\n')
+                        f.write(f'{self.edges.shape[0]+1+i} 2 {h+1} {self.n_vertices+1+i}\n')
 
-            # [DIHEDRALS] Only applicable to S-LAYER/elastic membrane
-            if self.slayer:
-                f.write(f'\nDihedrals # harmonic\n\n')
-                for i in range(self.n_slayer_dihedrals):
-                    f.write(f'{i + 1} 1 {self.slayer_dihedrals[i, 0] +self.n_vertices} {self.slayer_dihedrals[i, 1]  +self.n_vertices} {self.slayer_dihedrals[i, 2]  +self.n_vertices} {self.slayer_dihedrals[i, 3]  +self.n_vertices}\n')
+                # [DIHEDRALS] Only applicable to S-LAYER/elastic membrane
+                if self.slayer:
+                    f.write(f'\nDihedrals # harmonic\n\n')
+                    for i in range(self.n_slayer_dihedrals):
+                        f.write(f'{i + 1} 1 {self.slayer_dihedrals[i, 0] +self.n_vertices} {self.slayer_dihedrals[i, 1]  +self.n_vertices} {self.slayer_dihedrals[i, 2]  +self.n_vertices} {self.slayer_dihedrals[i, 3]  +self.n_vertices}\n')
 
-            # [ANGLES] Useful for polymers e.g., for rigidity
-            if add_angles:
-                f.write(f'\nAngles # harmonic\n\n')
-                counter_angles = 1
-                # iterate over the types of angles
-                for angtypes in range(n_angle_types):
-                    triplets = angle_triplets[str(angtypes+1)]
-                    n_angles_in_triplet = len(triplets)
-                    for i in range(n_angles_in_triplet):
-                        f.write(f'{counter_angles} {angtypes+1} {triplets[i][0]} {triplets[i][1]} {triplets[i][2]}\n')
-                        counter_angles +=1
+                # [ANGLES] Useful for polymers e.g., for rigidity
+                if add_angles:
+                    f.write(f'\nAngles # harmonic\n\n')
+                    counter_angles = 1
+                    # iterate over the types of angles
+                    for angtypes in range(n_angle_types):
+                        triplets = angle_triplets[str(angtypes+1)]
+                        n_angles_in_triplet = len(triplets)
+                        for i in range(n_angles_in_triplet):
+                            f.write(f'{counter_angles} {angtypes+1} {triplets[i][0]} {triplets[i][1]} {triplets[i][2]}\n')
+                            counter_angles +=1
 
-        # pass all the initial configuration data to LAMMPS to read
-        self.lmp.command('read_data sim_setup.in add merge')
+            # pass all the initial configuration data to LAMMPS to read
+            self.lmp.command('read_data sim_setup.in add merge')
 
         # LAMMPS ...............................................................
         # TABLE FOR SURFACE REPULSION
@@ -1117,11 +1165,12 @@ class TriLmp():
         # VELOCITIES
         # LAMMPS ...............................................................
         
-        
-        # velocity settings
-        self.atom_props = f"""
-                        velocity {group_particle_type[0]} create {self.algo_params.initial_temperature} 1298371 mom yes dist gaussian
-                        """
+        if restart_file is None:
+
+            # velocity settings
+            self.atom_props = f"""
+                            velocity {group_particle_type[0]} create {self.algo_params.initial_temperature} 1298371 mom yes dist gaussian
+                            """
         """
         # MMB NOTE: Commenting out because we are passing velocities
         # in the sim_setup file
@@ -1132,11 +1181,12 @@ class TriLmp():
             self.lmp.command('velocity all zero linear')
         """
 
-        # setting or reinitializing mesh velocities (important for pickle)
-        if np.any(self.mesh_velocity):
-            velocities = self.lmp.numpy.extract_atom("v")
-            for i in range(self.n_vertices):
-                velocities[i, :]=self.mesh_velocity[i,:]
+        if restart_file is None and initialize:
+            # setting or reinitializing mesh velocities (important for pickle)
+            if np.any(self.mesh_velocity):
+                velocities = self.lmp.numpy.extract_atom("v")
+                for i in range(self.n_vertices):
+                    velocities[i, :]=self.mesh_velocity[i,:]
 
         # LAMMPS ...............................................................
         # INTERACTIONS AND TRIMEM CALLBACK
@@ -1624,10 +1674,12 @@ class TriLmp():
             compute_amplitudes_on_the_fly = False, upper_threshold_amplitudes=1000, lower_threshold_amplitudes=0,
             frequency_amplitudes_on_the_fly=100, amplitude_shut_down = None, amplitude_turn_on = None,
             lmax = 15, carpet = False, halt_based_on_distance = False, halt_distance = 0,
-            flat_multivalency = False
+            flat_multivalency = False, pickle_frequency = 1000
         ):
 
         print("Starting a TriLMP run...")
+
+        self.pickle_frequency = pickle_frequency
 
         # pertains to 'division_fluctuations' project
         if compute_amplitudes_on_the_fly:
@@ -2171,7 +2223,8 @@ class TriLmp():
                             pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
                         # exit from the simulation
                         sys.exit(1)
-
+                
+                # which particles to move in multivalency simulations
                 if self.flat_multivalency:
                     self.lmp.command(f'group tomove clear')
                     self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
@@ -2415,22 +2468,27 @@ class TriLmp():
             self.cpt_writer()
             
         if self.generate_pickles:
-            if (self.MDsteps % self.output_params.info == 0):
+            if (self.MDsteps % self.pickle_frequency == 0):
+                
                 # MMB old pickling: produces too much data
                 #with open(f"checkpoints/ckpt_MDs_{self.MDsteps}_.pickle", 'wb') as f:
                 #    pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
                 # better to have a single pickle!
+                
                 if self.saveA:
                     self.saveA = False
                     self.saveB = True
                     with open(f"ckptA.pickle", 'wb') as f:
                         pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                    # write a r
+                    self.lmp.command('write_restart lammpsA.restart')
                 elif self.saveB:
                     self.saveA = True 
                     self.saveB = False
                     with open(f"ckptB.pickle", 'wb') as f:
                         pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
-        
+                    self.lmp.command('write_restart lammpsB.restart')
+
         # MMB open to clean-up
         if  self.MDsteps ==1:
             temp_file = open(f'{self.output_params.output_prefix}_system.dat','w')
