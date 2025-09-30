@@ -2141,17 +2141,37 @@ class TriLmp():
 
                 elif self.multivalency:
                     
-                    # count how many particles are there in the source
-                    particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+                    # if we have several sources
+                    if type(desired_particles_source) is list:
+                        
+                        # update the concentration in each of the sources
+                        for sourcenum in range(len(desired_particles_source)):
+                            
+                            # count how many particles are there in the specific source
+                            particles_source = self.lmp.numpy.extract_compute(f"countsource{sourcenum+1}", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
 
-                    # CAREFUL HERE!!! add needed particles in source
-                    to_add = desired_particles_source - particles_source[3]
+                            # CAREFUL HERE!!! add needed particles in source
+                            to_add = desired_particles_source[sourcenum] - particles_source[3]
 
-                    # if you need to add particles because there are not enough
-                    if to_add>0:
-                        self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE')
-                    if to_add<0:
-                        self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3} compress no')
+                            # if you need to add particles because there are not enough
+                            if to_add>0:
+                                self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE{sourcenum+1}')
+                            if to_add<0:
+                                self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource{sourcenum+1} SOURCE{sourcenum+1} {i+3} compress no')
+
+                    # if we have a single source
+                    else:
+                        # count how many particles are there in the source
+                        particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+
+                        # CAREFUL HERE!!! add needed particles in source
+                        to_add = desired_particles_source - particles_source[3]
+
+                        # if you need to add particles because there are not enough
+                        if to_add>0:
+                            self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE')
+                        if to_add<0:
+                            self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3} compress no')
 
                     # --------------------
                     # SINK
