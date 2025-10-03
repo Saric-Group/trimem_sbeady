@@ -2212,7 +2212,12 @@ class TriLmp():
                 self.lmp.command(f'group wholevesicle clear')
                 self.lmp.command(f'group wholevesicle union vertices ghost ssDNA DNARNA')
                 # empty tomove group, and refill again (integrator applies here)
-                if self.carpet:
+                
+                # which particles to move in multivalency simulations
+                if self.flat_multivalency:
+                    self.lmp.command(f'group tomove clear')
+                    self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
+                elif self.carpet:
                     # ssRNA and the boundRNA CANNOT MOVE!!!
                     self.lmp.command(f'group boundRNA clear')
                     self.lmp.command(f'group boundRNA type 6')
@@ -2222,7 +2227,6 @@ class TriLmp():
                     self.lmp.command(f'group tomove union vertices ssDNA DNARNA')
                     self.lmp.command(f'group printgroup clear')
                     self.lmp.command(f'group printgroup union vertices ghost ssDNA DNARNA boundRNA burnedRNA')
-
 
                     # ---------------------------------
                     # detect unbinding and halt the simulation
@@ -2243,11 +2247,6 @@ class TriLmp():
                             pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
                         # exit from the simulation
                         sys.exit(1)
-                
-                # which particles to move in multivalency simulations
-                if self.flat_multivalency:
-                    self.lmp.command(f'group tomove clear')
-                    self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
                 else:
                     self.lmp.command(f'group tomove clear')
                     self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
