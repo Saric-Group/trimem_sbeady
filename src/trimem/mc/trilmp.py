@@ -431,10 +431,13 @@ class TriLmp():
         #                            SOME MINOR PREREQUESITES                  #
         ########################################################################
 
+        # save restarting file
+        self.restart_file = restart_file
+
         # save alternating checkpoints
         self.saveA = True 
         self.saveB = False 
-
+        
         # initialization of (some) object attributes
         self.initialize           = initialize
         self.debug_mode           = debug_mode
@@ -1768,6 +1771,19 @@ class TriLmp():
             # exit - do not continue running
             return
         
+        if self.restart_file is not None:
+            # DO NOT UNCOMMENT THE TWO LINES BELOW
+            # THEY ARE HERE TO PROVE THAT THEY SHOULD
+            # NOT BE USED
+            #self.lmp.command(f'reset_atoms id sort yes')
+            #self.lmp.command(f'reset_atoms mol all')
+            self.lmp.command(f'set atom * image 0 0 0')
+            self.lmp.command(f'reset_atoms image all')
+            self.lmp.command(f'run 0')
+            self.lmp.command(f'write_restart thermalized.lammps')
+            print("THERMALIZATION DONE. INITIALIZING FROM A RESTART.")
+            #return
+
         # run simulation for dictated number
         # of MD steps
         while self.MDsteps<N:
