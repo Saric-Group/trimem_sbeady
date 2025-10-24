@@ -273,9 +273,6 @@ std::vector<std::array<int,4>> flip_parallel_batches_nsr(TriMesh& mesh, EnergyMa
         std::uniform_int_distribution<int> propose(0, nedges-1);
         int iflips = (int) std::ceil(nflips / nthread);
 
-
-
-
         for (int i=0; i<iflips; i++)
         {
 #pragma omp barrier

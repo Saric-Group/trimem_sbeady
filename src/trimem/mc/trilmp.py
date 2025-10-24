@@ -1348,7 +1348,7 @@ class TriLmp():
                 #    j-= 1
 
                 for i in range(nf-1):
-
+                    
                     # ---------------------------------------------------
                     # ABOUT THESE COMMANDS (see LAMMPS documentation)
                     # - delete_bonds
@@ -1356,19 +1356,20 @@ class TriLmp():
                     #   'special' keyword -> re-computes pairwise weighting list
                     #                        weighting list treats turned-off bonds the same as turned-on
                     #                        turned-off bonds have to be removed to change the weighting list
-
+                    
                     # REGULAR BONDS: DO NOT trigger internal list creation now (create_bonds)
                     self.lmp.command(f'create_bonds single/bond 1 {flip_id[i][0] + 1} {flip_id[i][1] + 1} special no') # the 'special no' here prevents the weighting list from being computed
                     self.lmp.command(f'group flip_off id {flip_id[i][2] + 1} {flip_id[i][3] + 1}') # you MUST create a group on which delete_bonds will adct
                     self.lmp.command(f'delete_bonds flip_off bond 1 remove') # you must (?) remove the bonds you are turning off
                     self.lmp.command('group flip_off clear') # you must clear the group or else particles will be added to it
-
+                
                 # LAST BOND: TRIGGER INTERNAL LIST CREATION NOW (create_bonds)
                 self.lmp.command(f'create_bonds single/bond 1 {flip_id[nf-1][0] + 1} {flip_id[nf-1][1] + 1} special yes') # the 'special yes' here is invoked to compute the weighting list
                 self.lmp.command(f'group flip_off id {flip_id[nf-1][2] + 1} {flip_id[nf-1][3] + 1}')
-                self.lmp.command(f'delete_bonds flip_off bond 1 remove special') # maybe the special is not needed here?
+                self.lmp.command(f'delete_bonds flip_off bond 1 remove special') 
                 self.lmp.command('group flip_off clear')
-                
+                self.lmp.command('run 0')
+
             # original implementation - more time-consuming
             else:
 
@@ -1423,6 +1424,9 @@ class TriLmp():
                 time_flips_trimem = time.time()
             
             self.mesh.f[:]=self.mesh.f
+            #print(f"LEFT SIDE: {len(self.mesh.f[:])}")
+            #print(f"NEW FACES: {len(self.mesh.f)}")
+            #print(f"{self.mesh.f}")
             self.lmp_flip(flip_ids)
 
             if self.debug_mode:
@@ -1799,6 +1803,11 @@ class TriLmp():
             self.hmc_info()
             self.callback(np.copy(self.mesh.x),self.counter)
             self.flip_info()
+            
+            # small verification to check that mesh remains a manifold
+            # i.e. that satisfied Euler characteristic chi = V - E + F
+            #print(f"NUMBER OF FACES: {len(self.mesh.f)}")
+            #print(f"Faces {self.mesh.f}")
 
             # check if simulation must stop
             self.halt_symbiont_simulation(i, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
