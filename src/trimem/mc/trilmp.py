@@ -378,6 +378,10 @@ class TriLmp():
                  bead_types=[2],                 # bead types
                  n_bond_types = 1,
                  bead_bonds = None,
+                 
+                 # EXTENSIONS MMB:
+                 # self-propelled particles in system (dipole-based propulsion)
+                 self_propelled = False,
 
                  # EXTENSIONS MMB:
                  # tethering binders on the surface of the membrane
@@ -455,7 +459,8 @@ class TriLmp():
         self.acceptance_rate      = 0.0
         self.heterogeneous_membrane = heterogeneous_membrane
         self.heterogeneous_membrane_id = heterogeneous_membrane_id
-
+        self.self_propelled       = self_propelled
+        
         # decide whether or not you want pickles
         self.generate_pickles     = generate_pickles
 
@@ -794,6 +799,11 @@ class TriLmp():
         atom_style_text = "hybrid bond charge"
         bond_dihedral_text = f"bond/types {n_bond_types}"
 
+        # if we want to have self-propelled particles in the system
+        if self.self_propelled:
+            # we use dipole instead of charge to also have the charge but now add the dipole
+            atom_style_text = "hybrid bond sphere dipole"
+
         # if we want to have angles in the system
         angle_style_text=""
         if add_angles:
@@ -922,18 +932,47 @@ class TriLmp():
 
                 # [COORDINATES] STANDARD SIMULATION SET-UP: only membrane and potentially nanoparticles
                 if (not self.slayer) and (not self.fix_rigid_symbiont) and (not heterogeneous_membrane) and (not add_angles):
-                    f.write(f'Atoms # hybrid\n\n')
-                    for i in range(self.n_vertices):
-                        f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+                    
+                    # if the beads around are not propelled (i.e., they don't have dipoles)
+                    # LAMMPS ATOM TYPE: Hybrid bond charge
+                    # which means: atom_ID atom-ype x y z molecule-ID q
+                    if not self.self_propelled:
+                        f.write(f'Atoms # hybrid\n\n')
+                        for i in range(self.n_vertices):
+                            f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
 
-                    # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
-                    if self.beads.n_beads:
-                        print('NBEADS: ', self.beads.n_beads)
-                        print('TOTAL: ', len(self.beads.types))
-                        print(self.beads.types)
-                        for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
-            
+                        # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
+                        if self.beads.n_beads:
+                            print('NBEADS: ', self.beads.n_beads)
+                            print('TOTAL: ', len(self.beads.types))
+                            print(self.beads.types)
+                            for i in range(self.beads.n_beads):
+                                f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
+
+                    # if the beads around are propelled (i.e., dipole-based propulsion)
+                    # LAMMPS ATOM TYPE: Hybrid bond sphere dipole
+                    # which means: atom_ID atom-ype x y z molecule-ID diameter density q mux muy muz
+                    elif self.self_propelled:
+                        f.write(f'Atoms # hybrid\n\n')
+                        for i in range(self.n_vertices):
+                            # give random dipoles to the beads
+                            f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 1.0 1.0 1.0 0 0 \n')
+
+                        # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
+                        if self.beads.n_beads:
+                            print('NBEADS: ', self.beads.n_beads)
+                            print('TOTAL: ', len(self.beads.types))
+                            print(self.beads.types)
+                            for i in range(self.beads.n_beads):
+                                # give dipoles that point towards vesicle center
+                                r2 = self.beads.positions[i,0]**2 + self.beads.positions[i,1]**2 + self.beads.positions[i,2]**2
+                                r  = np.sqrt(r2)
+                                dx = -self.beads.positions[i,0]/r
+                                dy = -self.beads.positions[i,1]/r
+                                dz = -self.beads.positions[i,2]/r
+                                density = 1.0/((4.0/3.0) * np.pi* (0.5*self.beads.bead_sizes[i])**3)
+                                f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 {self.beads.bead_sizes[i]} {density} 0 {dx} {dy} {dz}\n')
+
                 elif add_angles:
                     f.write(f'Atoms # full\n\n')
                     for i in range(self.n_vertices):
@@ -986,16 +1025,25 @@ class TriLmp():
                 f.write(f'\nVelocities \n\n')
                 # membrane particles are type 1
                 for i in range(self.n_vertices):
-                    f.write(f'{i + 1} 0.0 0.0 0.0 \n')
+                    if self.self_propelled:
+                        f.write(f'{i + 1} 0.0 0.0 0.0 0.0 0.0 0.0 \n')
+                    else:
+                        f.write(f'{i + 1} 0.0 0.0 0.0 \n')
 
                 # bead velocities
                 if self.beads.n_beads:
                     if np.any(self.beads.velocities):
                         for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} {self.beads.velocities[i, 0]} {self.beads.velocities[i, 1]} {self.beads.velocities[i, 2]}\n')
+                            if self.self_propelled:
+                                f.write(f'{self.n_vertices+1+i} {self.beads.velocities[i, 0]} {self.beads.velocities[i, 1]} {self.beads.velocities[i, 2]} 0.0 0.0 0.0\n')
+                            else:
+                                f.write(f'{self.n_vertices+1+i} {self.beads.velocities[i, 0]} {self.beads.velocities[i, 1]} {self.beads.velocities[i, 2]}\n')
                     else:
                         for i in range(self.beads.n_beads):
-                            f.write(f'{self.n_vertices+1+i} {0} {0} {0}\n')
+                            if self.self_propelled:
+                                f.write(f'{self.n_vertices+1+i} {0} {0} {0} 0 0 0\n')
+                            else:
+                                f.write(f'{self.n_vertices+1+i} {0} {0} {0}\n')
                 # [BONDS]
                 if self.slayer == False:
                     f.write(f'\nBonds # zero special\n\n')
