@@ -1638,6 +1638,7 @@ class TriLmp():
 
     def halt_symbiont_simulation(self, step, check_outofrange, check_outofrange_freq, check_outofrange_cutoff):
 
+        """
         if (self.equilibrated) and (check_outofrange) and (step%check_outofrange_freq ==0):
             pos_alloc=self.lmp.numpy.extract_atom("x")
             self.mesh.x[:] = np.array(pos_alloc[:self.n_vertices])
@@ -1646,6 +1647,26 @@ class TriLmp():
             if np.all(distance_beads_nanoparticle > check_outofrange_cutoff):
                 fileERROR = open("ERROR_REPORT.dat", "w")
                 fileERROR.writelines(f"Nanoparticle reached cutoff range at step {step}")
+                fileERROR.close()
+                sys.exit(0)
+        """
+
+        if (self.equilibrated) and (check_outofrange) and (step%check_outofrange_freq ==0):
+            
+            pos_alloc=self.lmp.numpy.extract_atom("x")
+            self.mesh.x[:] = np.array(pos_alloc[:self.n_vertices])
+            self.beads.positions[:] = np.array(pos_alloc[self.n_vertices:self.n_vertices+self.beads.n_beads])
+
+            any_bead_close = False
+            
+            for i in range(len(self.beads.positions)):
+                distance_beads_nanoparticle = np.sqrt((self.mesh.x[:, 0] - self.beads.positions[i,0])**2 + (self.mesh.x[:, 1] - self.beads.positions[i,1])**2 + (self.mesh.x[:, 2] - self.beads.positions[i,2])**2)
+                if not np.all(distance_beads_nanoparticle > check_outofrange_cutoff):
+                    any_bead_close = True
+            
+            if not any_bead_close:
+                fileERROR = open("ERROR_REPORT.dat", "w")
+                fileERROR.writelines(f"Nanoparticle(s) reached cutoff range at step {step}")
                 fileERROR.close()
                 sys.exit(0)
 
@@ -1858,7 +1879,7 @@ class TriLmp():
             #print(f"Faces {self.mesh.f}")
 
             # check if simulation must stop
-            self.halt_symbiont_simulation(i, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
+            self.halt_symbiont_simulation(self.MDsteps, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
 
             # stop simulation is membrane gets close to something
             if halt_based_on_distance and self.MDsteps>self.equilibration_rounds:
@@ -1960,38 +1981,81 @@ class TriLmp():
                         
                     # multiple symbionts on shell
                     elif self.beads.n_beads>1:
-                        buffering =1.05
+
+                        # .... stage 1: find points symmetrically distributed on surface sphere
                         sigma_tilde = 0.5*(1+self.beads.bead_sizes)
-                        n = self.beads.n_beads
+                        n           = self.beads.n_beads
+                        i           = np.arange(0, n)
                         goldenRatio = (1+5**0.5)/2
-                        i = np.arange(0, n)
-                        theta = 2*np.pi*i/goldenRatio
-                        phi = np.arccos(1-2*(i+0.5)/n)
-                        r = np.sqrt(self.mesh.x[0, 0]**2 + self.mesh.x[0, 1]**2 + self.mesh.x[0, 2]**2)
-                        r += interaction_range*sigma_tilde
-                        x, y, z = r*np.cos(theta)*np.sin(phi), r*np.sin(theta)*np.sin(phi), r*np.cos(phi)
-
+                        theta       = 2*np.pi*i/goldenRatio
+                        phi         = np.arccos(1-2*(i+0.5)/n)
+                        # get the com of the vesicle
+                        xcm = np.mean(self.mesh.x[:, 0])
+                        ycm = np.mean(self.mesh.x[:, 1])
+                        zcm = np.mean(self.mesh.x[:, 2])
+                        # get the radius of the vesicle (max distance to the center, in case it is not a perfect sphere)
+                        r           = np.max(np.sqrt((self.mesh.x[:, 0]-xcm)**2 + (self.mesh.x[:, 1]-ycm)**2 + (self.mesh.x[:, 2]-zcm)**2))
+                        r          += interaction_range*sigma_tilde
+                        x, y, z     = r*np.cos(theta)*np.sin(phi)+xcm, r*np.sin(theta)*np.sin(phi)+ycm, r*np.cos(phi)+zcm
+                        # find the points on surface of vesicle closest to designated points
+                        #total_points, ovitopoints = 0, []
                         for q in range(self.beads.n_beads):
-                            min_distance = 1000
                             xx, yy, zz = x[q], y[q], z[q]
-                            for qq in range(self.n_vertices):
-                                xv = self.mesh.x[qq, 0]
-                                yv = self.mesh.x[qq, 1]
-                                zv = self.mesh.x[qq, 2]
-                                distance = np.sqrt((xv-xx)**2 + (yv-yy)**2 + (zv-zz)**2)
-                                if distance < min_distance:
-                                    min_distance = distance
-                                    index = qq
+                            # get the index of the particle that is the closest
+                            beads_membrane_distances = np.sqrt((self.mesh.x[:, 0]-xx)**2+(self.mesh.x[:, 1]-yy)**2+(self.mesh.x[:, 2]-zz)**2)
+                            min_distance_index = np.where(beads_membrane_distances == min(beads_membrane_distances))[0][0]
+                            # get a small plane of beads around the specific point
+                            distances_to_point = np.sqrt((self.mesh.x[:, 0]-self.mesh.x[min_distance_index, 0])**2+ (self.mesh.x[:, 1]-self.mesh.x[min_distance_index, 1])**2 + (self.mesh.x[:, 2]-self.mesh.x[min_distance_index, 2])**2)
+                            indices_close      = np.where(distances_to_point<4)[0]
+                            points             = self.mesh.x[indices_close]
+                            #for pp in range(len(points)):
+                            #    total_points+=1 
+                            #    ovitopoints.append([points[pp, 0], points[pp, 1], points[pp, 2], q])
+                            # compute the centroid of those points
+                            centroid_x = np.mean(points[:, 0])
+                            centroid_y = np.mean(points[:, 1])
+                            centroid_z = np.mean(points[:, 2])
+                            #total_points+=1
+                            #ovitopoints.append([centroid_x, centroid_y, centroid_z, 100])
 
-                            xtemp = self.mesh.x[index, 0]
-                            ytemp = self.mesh.x[index, 1]
-                            ztemp = self.mesh.x[index, 2]
-                            rtemp = np.sqrt(xtemp**2 + ytemp**2 + ztemp**2)
-
-                            pos_alloc[self.n_vertices+q, 0] = xtemp + interaction_range*sigma_tilde[q]*xtemp/rtemp # old interaction range was 1.05
-                            pos_alloc[self.n_vertices+q, 1] = ytemp + interaction_range*sigma_tilde[q]*ytemp/rtemp
-                            pos_alloc[self.n_vertices+q, 2] = ztemp + interaction_range*sigma_tilde[q]*ztemp/rtemp
-                            
+                            # center the points
+                            points[:, 0] -= centroid_x
+                            points[:, 1] -= centroid_y
+                            points[:, 2] -= centroid_z
+                            # compute the svd
+                            U, S, Vt = np.linalg.svd(points)
+                            normal = Vt[-1] # last right-singular vector, direction of least variance
+                            normal /= np.linalg.norm(normal)
+                            # determine vector from centroid to symbiont
+                            vx = pos_alloc[self.n_vertices+q, 0]-centroid_x
+                            vy = pos_alloc[self.n_vertices+q, 1]-centroid_y
+                            vz = pos_alloc[self.n_vertices+q, 2]-centroid_z
+                            # project vector onto normal to the plane
+                            a = np.array([vx, vy, vz])
+                            angle = np.arccos(np.dot(a, normal)/(np.dot(a, a)*np.dot(normal, normal)))
+                            if angle>np.pi/2:
+                                normal*=(-1)
+                            # update the position of the symbiotes as relevant
+                            pos_alloc[self.n_vertices+q, 0] = self.mesh.x[min_distance_index, 0] + interaction_range*sigma_tilde[q]*normal[0]
+                            pos_alloc[self.n_vertices+q, 1] = self.mesh.x[min_distance_index, 1] + interaction_range*sigma_tilde[q]*normal[1]
+                            pos_alloc[self.n_vertices+q, 2] = self.mesh.x[min_distance_index, 2] + interaction_range*sigma_tilde[q]*normal[2]
+                        
+                        """
+                        ovitoFILE = open("./ovitotemp.dump", "w")
+                        ovitoFILE.writelines("ITEM: TIMESTEP\n ")
+                        ovitoFILE.write(f"{0}\n")
+                        ovitoFILE.write("ITEM: NUMBER OF ATOMS\n")
+                        ovitoFILE.write(f"{total_points}\n")
+                        ovitoFILE.write("ITEM: BOX BOUNDS fff\n")
+                        ovitoFILE.write("-100 100\n")
+                        ovitoFILE.write("-100 100\n")
+                        ovitoFILE.write("-100 100\n")
+                        ovitoFILE.write("ITEM: ATOMS id x y z type \n")
+                        for pp in range(total_points):
+                            ovitoFILE.writelines(f"{pp+1} {ovitopoints[pp][0]} {ovitopoints[pp][1]} {ovitopoints[pp][2]} {ovitopoints[pp][3]}\n")
+                        ovitoFILE.close()
+                        counter_points = 0
+                        """
                 # change status of the membrane
                 self.equilibrated = True
 
