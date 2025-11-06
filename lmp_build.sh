@@ -20,35 +20,26 @@ else
 	export SHLIB_EXT='.so'
 fi
 
-
 cd lammps || exit
 rm -rdf build
 mkdir build
 cd build || exit
 
-
-
 args=""
-# args+=" -D PKG_ASPHERE=ON"
-# args+=" -D PKG_BODY=ON"
-# args+=" -D PKG_BROWNIAN=ON"
-# args+=" -D PKG_CORESHELL=ON"
 args+=" -D PKG_DIPOLE=ON"
+args+=" -D PKG_ASPHERE=ON"
+args+=" -D PKG_BROWNIAN=ON"
 args+=" -D PKG_EXTRA-COMPUTE=ON"
-args+=" -D PKG_EXTRA-DUMP=ON"
 args+=" -D PKG_EXTRA-FIX=ON"
+args+=" -D PKG_EXTRA-DUMP=ON"
 args+=" -D PKG_EXTRA-MOLECULE=ON"
 args+=" -D PKG_EXTRA-PAIR=ON"
-# args+=" -D PKG_GRANULAR=ON"
-# args+=" -D PKG_H5MD=ON"
+args+=" -D PKG_MC=ON"
 args+=" -D PKG_MISC=ON"
 args+=" -D PKG_MOLECULE=ON"
-# args+=" -D PKG_NETCDF=ON"
 args+=" -D PKG_OPT=ON"
 args+=" -D PKG_PLUGIN=ON"
-# args+=" -D PKG_REPLICA=ON"
 args+=" -D PKG_RIGID=ON"
-# args+=" -D WITH_GZIP=ON"
 
 
 # Plugins - n2p2 and latte

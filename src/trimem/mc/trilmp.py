@@ -1059,7 +1059,7 @@ class TriLmp():
 
                 if multivalency:
                     for i in range(len(multivalent_bonds)):
-                        f.write(f'{self.edges.shape[0] + i + 1} 2 {multivalent_bonds[i, 0]+1} {multivalent_bonds[i, 1]+1}\n')
+                        f.write(f'{self.edges.shape[0] + i + 1} {multivalent_bonds[i, 2]} {multivalent_bonds[i, 0]+1} {multivalent_bonds[i, 1]+1}\n')
 
                 if add_tether:
                     for i in range(n_tethers):
@@ -1750,7 +1750,7 @@ class TriLmp():
             compute_amplitudes_on_the_fly = False, upper_threshold_amplitudes=1000, lower_threshold_amplitudes=0,
             frequency_amplitudes_on_the_fly=100, amplitude_shut_down = None, amplitude_turn_on = None,
             lmax = 15, carpet = False, halt_based_on_distance = False, halt_distance = 0,
-            flat_multivalency = False, pickle_frequency = 1000
+            flat_multivalency = False, pickle_frequency = 1000, with_aux = False
         ):
 
         print("Starting a TriLMP run...")
@@ -2386,7 +2386,11 @@ class TriLmp():
                         sys.exit(1)
                 else:
                     self.lmp.command(f'group tomove clear')
-                    self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
+
+                    if with_aux:
+                        self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA aux')
+                    else:
+                        self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
 
             # compute the amplitudes of the spherical harmonics
             if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and compute_amplitudes_on_the_fly:
