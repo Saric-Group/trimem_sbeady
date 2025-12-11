@@ -393,6 +393,16 @@ class TriLmp():
                  multivalent_bonds            = None,
                  Nlinkers                     = 0,
 
+                 # EXTENSIONS MMB:
+                 # multivalency with DPD solvent
+                 dpdmultivalency=False,
+                 dpdmultivalent_linker_length = 0.0,
+                 dpdmultivalent_linker_stiffness = 0.0,
+                 dpdmultivalent_hybridization_length = 0.0,
+                 dpdmultivalent_hybridization_stiffness = 0.0,
+                 dpdmultivalent_bonds            = None,
+                 dpdNlinkers                     = 0,
+
                  # EXTENSIONS MMB: ELASTIC MEMBRANE/S-LAYER
                  # (must be initialized in init because affects input file)
                  slayer = False,             # set true if simulation also contains elastic membrane
@@ -710,6 +720,27 @@ class TriLmp():
                     """
 
         ########################################################################
+        #                  EXTENSION: DPD MULTIVALENCY                         #
+        ########################################################################
+        self.dpdmultivalency = dpdmultivalency
+        if dpdmultivalency:
+            self.dpdmultivalent_linker_length=dpdmultivalent_linker_length
+            self.dpdmultivalent_linker_stiffness=dpdmultivalent_linker_stiffness
+            self.dpdmultivalent_hybridization_stiffness=dpdmultivalent_hybridization_stiffness
+            self.dpdmultivalent_hybridization_length=dpdmultivalent_hybridization_length
+            n_bond_types+=2 # 2 new bond types, one for the creation of the valency and one for the linkers 
+            n_tethers=Nlinkers
+            self.Nlinkers = Nlinkers
+            # special bonds not exactly zero so that they can be overriden if needed
+            bond_text=f"""
+                        special_bonds lj/coul 1 1 1
+                        bond_style hybrid zero nocoeff harmonic
+                        bond_coeff 1 zero 0.0
+                        bond_coeff 2 harmonic {self.dpdmultivalent_linker_stiffness} {self.dpdmultivalent_linker_length}
+                        bond_coeff 3 harmonic {self.dpdmultivalent_hybridization_stiffness} {self.dpdmultivalent_hybridization_length}
+                    """
+
+        ########################################################################
         #             EXTENSION: ELASTIC MEMBRANE/SLAYER                       #
         ########################################################################
 
@@ -799,6 +830,9 @@ class TriLmp():
         atom_style_text = "hybrid bond charge"
         bond_dihedral_text = f"bond/types {n_bond_types}"
 
+        if self.dpdmultivalency:
+            atom_style_text = "hybrid bond charge mdpd"
+            
         # if we want to have self-propelled particles in the system
         if self.self_propelled:
             # we use dipole instead of charge to also have the charge but now add the dipole
@@ -933,26 +967,11 @@ class TriLmp():
                 # [COORDINATES] STANDARD SIMULATION SET-UP: only membrane and potentially nanoparticles
                 if (not self.slayer) and (not self.fix_rigid_symbiont) and (not heterogeneous_membrane) and (not add_angles):
                     
-                    # if the beads around are not propelled (i.e., they don't have dipoles)
-                    # LAMMPS ATOM TYPE: Hybrid bond charge
-                    # which means: atom_ID atom-ype x y z molecule-ID q
-                    if not self.self_propelled:
-                        f.write(f'Atoms # hybrid\n\n')
-                        for i in range(self.n_vertices):
-                            f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
-
-                        # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
-                        if self.beads.n_beads:
-                            print('NBEADS: ', self.beads.n_beads)
-                            print('TOTAL: ', len(self.beads.types))
-                            print(self.beads.types)
-                            for i in range(self.beads.n_beads):
-                                f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
 
                     # if the beads around are propelled (i.e., dipole-based propulsion)
                     # LAMMPS ATOM TYPE: Hybrid bond sphere dipole
                     # which means: atom_ID atom-ype x y z molecule-ID diameter density q mux muy muz
-                    elif self.self_propelled:
+                    if self.self_propelled:
                         f.write(f'Atoms # hybrid\n\n')
                         for i in range(self.n_vertices):
                             # give random dipoles to the beads
@@ -972,6 +991,40 @@ class TriLmp():
                                 dz = -self.beads.positions[i,2]/r
                                 density = 1.0/((4.0/3.0) * np.pi* (0.5*self.beads.bead_sizes[i])**3)
                                 f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 {self.beads.bead_sizes[i]} {density} 0 {dx} {dy} {dz}\n')
+
+                    # if the beads around are not propelled (i.e., they don't have dipoles)
+                    # but they will be subjected to a dpd thermostat
+                    # LAMMPS ATOM TYPE: Hybrid bond charge mdpd
+                    # which means: atom_ID atom-ype x y z molecule-ID q rho
+                    elif dpdmultivalency:
+                        rho = 1/(4.0/3.0*np.pi*0.5**3)
+                        f.write(f'Atoms # hybrid\n\n')
+                        for i in range(self.n_vertices):
+                            f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 {rho} \n')
+
+                        # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
+                        if self.beads.n_beads:
+                            print('NBEADS: ', self.beads.n_beads)
+                            print('TOTAL: ', len(self.beads.types))
+                            print(self.beads.types)
+                            for i in range(self.beads.n_beads):
+                                f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0 {rho}\n')
+
+                    # if the beads around are not propelled (i.e., they don't have dipoles)
+                    # LAMMPS ATOM TYPE: Hybrid bond charge
+                    # which means: atom_ID atom-ype x y z molecule-ID q
+                    else:
+                        f.write(f'Atoms # hybrid\n\n')
+                        for i in range(self.n_vertices):
+                            f.write(f'{i + 1} 1  {self.mesh.x[i, 0]} {self.mesh.x[i, 1]} {self.mesh.x[i, 2]} 1 1.0 \n')
+
+                        # NOTE: Beads do not belong to the 'vertices' molecule and they don't have charge
+                        if self.beads.n_beads:
+                            print('NBEADS: ', self.beads.n_beads)
+                            print('TOTAL: ', len(self.beads.types))
+                            print(self.beads.types)
+                            for i in range(self.beads.n_beads):
+                                f.write(f'{self.n_vertices+1+i} {int(self.beads.types[i])} {self.beads.positions[i,0]} {self.beads.positions[i,1]} {self.beads.positions[i,2]} 0 0\n')
 
                 elif add_angles:
                     f.write(f'Atoms # full\n\n')
@@ -1060,6 +1113,10 @@ class TriLmp():
                 if multivalency:
                     for i in range(len(multivalent_bonds)):
                         f.write(f'{self.edges.shape[0] + i + 1} {multivalent_bonds[i, 2]} {multivalent_bonds[i, 0]+1} {multivalent_bonds[i, 1]+1}\n')
+
+                if dpdmultivalency:
+                    for i in range(len(dpdmultivalent_bonds)):
+                        f.write(f'{self.edges.shape[0] + i + 1} {dpdmultivalent_bonds[i, 2]} {dpdmultivalent_bonds[i, 0]+1} {dpdmultivalent_bonds[i, 1]+1}\n')
 
                 if add_tether:
                     for i in range(n_tethers):
