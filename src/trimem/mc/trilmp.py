@@ -729,11 +729,11 @@ class TriLmp():
             self.dpdmultivalent_hybridization_stiffness=dpdmultivalent_hybridization_stiffness
             self.dpdmultivalent_hybridization_length=dpdmultivalent_hybridization_length
             n_bond_types+=2 # 2 new bond types, one for the creation of the valency and one for the linkers 
-            n_tethers=Nlinkers
-            self.Nlinkers = Nlinkers
+            n_tethers=dpdNlinkers
+            self.Nlinkers = dpdNlinkers
             # special bonds not exactly zero so that they can be overriden if needed
             bond_text=f"""
-                        special_bonds lj/coul 1 1 1
+                        special_bonds lj/coul 1e-10 1e-10 1e-10
                         bond_style hybrid zero nocoeff harmonic
                         bond_coeff 1 zero 0.0
                         bond_coeff 2 harmonic {self.dpdmultivalent_linker_stiffness} {self.dpdmultivalent_linker_length}
@@ -1279,6 +1279,7 @@ class TriLmp():
             self.atom_props = f"""
                             velocity {group_particle_type[0]} create {self.algo_params.initial_temperature} 1298371 mom yes dist gaussian
                             """
+
         """
         # MMB NOTE: Commenting out because we are passing velocities
         # in the sim_setup file
@@ -1807,7 +1808,8 @@ class TriLmp():
             compute_amplitudes_on_the_fly = False, upper_threshold_amplitudes=1000, lower_threshold_amplitudes=0,
             frequency_amplitudes_on_the_fly=100, amplitude_shut_down = None, amplitude_turn_on = None,
             lmax = 15, carpet = False, halt_based_on_distance = False, halt_distance = 0,
-            flat_multivalency = False, pickle_frequency = 1000, with_aux = False
+            flat_multivalency = False, pickle_frequency = 1000, with_aux = False,
+            simplegcmc = False,
         ):
 
         print("Starting a TriLMP run...")
@@ -2134,6 +2136,11 @@ class TriLmp():
                 if self.debug_mode:
                     print("These are your current fixes: ")
                     print(self.L.fixes)
+
+            if (simplegcmc):
+                # change particle types in source and sink to establish a gradient
+                self.lmp.command('set region source type 3')
+                self.lmp.command('set region sink type 7')
 
             # protocols that rely on LAMMPS commands which have to be added after equilibration
             if (self.equilibrated) and (step_dependent_protocol):
