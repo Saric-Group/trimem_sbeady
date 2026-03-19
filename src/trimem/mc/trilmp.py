@@ -1802,7 +1802,7 @@ class TriLmp():
             factor_inside_membrane=0, naive_compression = False, desired_interlayer_distance=0, 
             gcmc_by_hand=False, desired_particles_source=0, pure_sink=False, desired_particles_sink=0,
             ghost_membrane_consumes = False, cutoff_consumption = 0, move_membrane=True, force_field_normals = False,
-            A_force =0 , B_force =0, linear_force=False, exponential_force = False, concentration_source = 0, 
+            A_force =0 , B_force =0, linear_force=False, exponential_force = False, phoretic_force = False, concentration_source = 0, 
             diffusion_coefficient = 1, evaluate_tip = False, tip_range = 0, evaluate_tip_freq = 0,
             interaction_range = 1.45, flat_patch = False, alternating_protocol=False, move_reactants =False,
             compute_amplitudes_on_the_fly = False, upper_threshold_amplitudes=1000, lower_threshold_amplitudes=0,
@@ -1844,6 +1844,8 @@ class TriLmp():
         self.exponential_force = exponential_force
         self.concentration_source = concentration_source
         self.diffusion_coefficient = diffusion_coefficient
+        # if you want to have phoretic forces (it uses A_force as the magnitude)
+        self.phoretic_force = phoretic_force
 
         # [HARDCODED STUFF] apply heuristic factor to transform concentration into force
         rc = 1.5
@@ -2563,6 +2565,9 @@ class TriLmp():
         This is where the forces on the membrane beads, computed by TriMEM
         are extracted, and LAMMPS uses them to act on the membrane beads.
         We make it be equal, not add?
+
+        CAREFUL: Make sure that you ADD += new contributions after the
+        TRIMEM HAMILTONIAN, or else you subtitute it
         """
 
         #print(tag)
@@ -2583,6 +2588,9 @@ class TriLmp():
             new_mesh = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f)
             face_normals = new_mesh.face_normals
             mean_vertex_normals = trimesh.geometry.mean_vertex_normals(len(self.mesh.x), self.mesh.f, face_normals)
+            norm_mean_vertex_normals = np.sqrt(mean_vertex_normals[:, 0]**2 + mean_vertex_normals[:, 1]**2 + mean_vertex_normals[:, 2]**2)
+            norm_mean_vertex_normals_newaxis = norm_mean_vertex_normals[:, np.newaxis]
+            mean_vertex_normals/=norm_mean_vertex_normals_newaxis
 
             # force field in the direction of x
             if self.linear_force:
@@ -2596,10 +2604,15 @@ class TriLmp():
                 elif self.time_force>0:
                     magnitude_force = self.concentration_source*(1-erf(self.mesh.x[:, 0]/(2*np.sqrt(self.diffusion_coefficient*self.time_force))))
 
-            magnitude_force_newaxis = magnitude_force[:, np.newaxis]
-
-            forces_to_add = mean_vertex_normals*magnitude_force_newaxis
-            f[:self.n_vertices] += forces_to_add
+            elif self.phoretic_force:
+                distance_r2  = self.mesh.x[:, 0]**2 + self.mesh.x[:, 1]**2 + self.mesh.x[:, 2]**2
+                magnitude_force = self.A_force/distance_r2                
+            
+            if self.equilibrated:
+                # enables broadcasting of arrays
+                magnitude_force_newaxis = magnitude_force[:, np.newaxis]
+                forces_to_add = magnitude_force_newaxis*mean_vertex_normals
+                f[:self.n_vertices] += forces_to_add
 
         # if needed for flat membrane, correct
         if np.any(self.vertices_at_edge):
