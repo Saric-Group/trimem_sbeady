@@ -870,8 +870,15 @@ class TriLmp():
 
                 run_style verlet
 
+                # store forces before the callback
+                # to separate internal from external/callback forces
+                fix beforestoredforces all store/force
+
                 # TriMEM computation of the forces
                 fix ext all external pf/callback 1 1
+
+                # store forces after the callback
+                fix afterstoredforces all store/force
 
                 timestep {self.algo_params.step_size}
 
@@ -903,9 +910,15 @@ class TriLmp():
                 read_restart {restart_file}
                 run_style verlet
 
+                # store forces before the callback
+                # to separate internal from external/callback forces
+                fix beforestoredforces all store/force
+
                 # TriMEM computation of the forces
                 fix ext all external pf/callback 1 1
 
+                fix afterstoredforces all store/force
+                
                 timestep {self.algo_params.step_size}
 
                 {block(bond_text)}
@@ -2139,7 +2152,7 @@ class TriLmp():
                     print("These are your current fixes: ")
                     print(self.L.fixes)
 
-            if (simplegcmc):
+            if (self.equilibrated) and (simplegcmc):
                 # change particle types in source and sink to establish a gradient
                 self.lmp.command('set region source type 3')
                 self.lmp.command('set region sink type 7')
