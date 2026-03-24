@@ -431,7 +431,6 @@ class TriLmp():
                  # Add angle potentials to the simulation
                  add_angles = False,
                  n_angle_types=0,
-                 n_angles=0,
                  angles_total=0,
                  angle_triplets=None,  # Dictionary with structure {'angle_type':[[A, B, C], [D, E, F]]}
 
@@ -1158,7 +1157,7 @@ class TriLmp():
                         triplets = angle_triplets[str(angtypes+1)]
                         n_angles_in_triplet = len(triplets)
                         for i in range(n_angles_in_triplet):
-                            f.write(f'{counter_angles} {angtypes+1} {triplets[i][0]} {triplets[i][1]} {triplets[i][2]}\n')
+                            f.write(f'{counter_angles} {angtypes+1} {triplets[i][0]+1} {triplets[i][1]+1} {triplets[i][2]+1}\n')
                             counter_angles +=1
 
             # pass all the initial configuration data to LAMMPS to read
