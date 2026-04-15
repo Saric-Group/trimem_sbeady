@@ -60,6 +60,13 @@ Build and compile the shared libraries using:
 python setup.py build
 ```
 
+(MAC users) If you have a problem with this step due to ```OpenMesh```, you might have to change the line
+```cmake_minimum_required(VERSION 3.1.0 FATAL_ERROR)```
+for 
+```cmake_minimum_required(VERSION 3.5.0 FATAL_ERROR)```
+within ```OpenMesh/CMakeLists.txt```.
+
+
 Note that this folder will be the actual location of the modules with an editable install, i.e., if you change something in the python code here, effects will be immediate. In case you want to change something on the c++ side of the code, make sure to run 
 ```bash
 python3 setup.py build
