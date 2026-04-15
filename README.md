@@ -34,6 +34,8 @@ git clone --recurse-submodules [repository]
 git submodule update
 ```
 
+(Note that at the moment, LAMMPS is not added as a submodule so that you have the freedom to choose what LAMMPS do you want. See more details below).
+
 ### 2. Setting up the conda environment
 
 To set up a conda environment including some prerequisites use:
