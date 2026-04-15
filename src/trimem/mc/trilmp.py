@@ -1232,16 +1232,42 @@ class TriLmp():
             """))
 
         # [INTERACTION POTENTIAL] - SINGLE PARTICLE IN MEMBRANE
-        if not heterogeneous_membrane:
-            # write down the table for surface repulsion
-            self.lmp.commands_string(dedent(f"""\
-            pair_style python {self.eparams.repulse_params.lc1}
-            pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
-            shell rm -f trimem_srp.table
-            pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp 1.0 1.0
-            pair_style none
-            """))
+        
+        # ORIGINAL IMPLEMENTATION
+        # write down the table for surface repulsion
+        #self.lmp.commands_string(dedent(f"""\
+        #pair_style python {self.eparams.repulse_params.lc1}
+        #pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
+        #shell rm -f trimem_srp.table
+        #pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp 1.0 1.0
+        #pair_style none
+        #"""))
 
+        # Mac-compatible code: generate surface repulsion table in pure Python, instead of using the Mac-linked python
+        lc1 = self.eparams.repulse_params.lc1
+        srp1 = lc1
+        srp2 = self.eparams.kappa_r
+        srp3 = self.eparams.repulse_params.r
+
+        # clean-up if table exists
+        if os.path.exists("trimem_srp.table"):
+            os.remove("trimem_srp.table")
+            
+        with open("trimem_srp.table", "w") as _f:
+            
+            _f.write("trimem_srp\nN 2000 RSQ 0.000001 %s\n\n" % lc1)
+            for _i in range(1, 2001):
+                _rsq = 1e-6 + (lc1 - 1e-6) * (_i-1) / 1999
+                _r = np.sqrt(_rsq)
+                _rl = _r - srp1
+                if _rl >= 0:
+                    _e, _f2 = 0.0, 0.0
+                else:
+                    _e = np.exp(_r/_rl) / _r**srp3 * srp2
+                    _f2 = srp2 * np.exp(_r/_rl) * (srp1/(_rl**2) + srp3/_r) / _r**(srp3+1)
+                _f.write(f"{_i} {_rsq:.10e} {_e:.10e} {_f2:.10e}\n")
+
+        if not heterogeneous_membrane:
             # get the 'table' interaction to work
             self.lmp.commands_string(dedent(f"""\
             pair_style hybrid/overlay table linear 2000 lj/cut 2.5
@@ -1252,24 +1278,25 @@ class TriLmp():
         
         # [EXTENSION] [INTERACTION POTENTIAL] - TWO PARTICLES IN MEMBRANE
         if heterogeneous_membrane:
+            # ORIGINAL IMPLEMENTATION
             # write down the table for surface repulsion
-            self.lmp.commands_string(dedent(f"""\
-            pair_style python {self.eparams.repulse_params.lc1}
-            pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
-            shell rm -f trimem_srp.table
-            pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp11 1.0 1.0
-            pair_write  2 2 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp22 1.0 1.0
-            pair_write  1 2 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp12 1.0 1.0
-            pair_style none
-            """))
+            #self.lmp.commands_string(dedent(f"""\
+            #pair_style python {self.eparams.repulse_params.lc1}
+            #pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
+            #shell rm -f trimem_srp.table
+            #pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp11 1.0 1.0
+            #pair_write  2 2 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp22 1.0 1.0
+            #pair_write  1 2 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp12 1.0 1.0
+            #pair_style none
+            #"""))
 
             # get the 'table' interaction to work
             self.lmp.commands_string(dedent(f"""\
             pair_style hybrid/overlay table linear 2000 lj/cut 2.5
             pair_modify pair table special lj/coul 0.0 0.0 0.0 tail no
-            pair_coeff 1 1 table trimem_srp.table trimem_srp11
-            pair_coeff 2 2 table trimem_srp.table trimem_srp22
-            pair_coeff 1 2 table trimem_srp.table trimem_srp12
+            pair_coeff 1 1 table trimem_srp.table trimem_srp
+            pair_coeff 2 2 table trimem_srp.table trimem_srp
+            pair_coeff 1 2 table trimem_srp.table trimem_srp
             pair_coeff * * lj/cut 0 0 0
             """))
 
