@@ -105,7 +105,7 @@ from lammps import lammps, PyLammps, LAMMPS_INT, LMP_STYLE_GLOBAL, LMP_VAR_EQUAL
 from scipy.spatial import KDTree
 
 # for spherical harmonics analysis
-from chemical_gradients.module_sphericalharmonics import *
+#from chemical_gradients.module_sphericalharmonics import *
 
 _sp = u'\U0001f604'
 _nl = '\n'+_sp
@@ -377,7 +377,6 @@ class TriLmp():
                  bead_sizes=0.0,                # bead sizes
                  bead_types=[2],                 # bead types
                  n_bond_types = 1,
-                 bead_bonds = None,
                  
                  # EXTENSIONS MMB:
                  # self-propelled particles in system (dipole-based propulsion)
@@ -469,7 +468,9 @@ class TriLmp():
         self.heterogeneous_membrane = heterogeneous_membrane
         self.heterogeneous_membrane_id = heterogeneous_membrane_id
         self.self_propelled       = self_propelled
-        
+        self.Nlinkers = 0
+        self.dpdNlinkers = 0
+
         # decide whether or not you want pickles
         self.generate_pickles     = generate_pickles
 
@@ -506,6 +507,7 @@ class TriLmp():
 
         # extract number of membrane vertices in simulation
         self.n_vertices=self.mesh.x.shape[0]
+        print('Number of vertices: ', self.n_vertices)
         # extract the number of membrane faces in simulation
         self.n_faces   = self.mesh.f.shape[0]
 
@@ -701,11 +703,12 @@ class TriLmp():
         #                  EXTENSION: MULTIVALENCY                             #
         ########################################################################
         self.multivalency = multivalency
+        self.multivalent_linker_length=multivalent_linker_length
+        self.multivalent_linker_stiffness=multivalent_linker_stiffness
+        self.multivalent_hybridization_stiffness=multivalent_hybridization_stiffness
+        self.multivalent_hybridization_length=multivalent_hybridization_length
+        self.multivalent_bonds = multivalent_bonds
         if multivalency:
-            self.multivalent_linker_length=multivalent_linker_length
-            self.multivalent_linker_stiffness=multivalent_linker_stiffness
-            self.multivalent_hybridization_stiffness=multivalent_hybridization_stiffness
-            self.multivalent_hybridization_length=multivalent_hybridization_length
             n_bond_types+=2 # 2 new bond types, one for the creation of the valency and one for the linkers 
             n_tethers=Nlinkers
             self.Nlinkers = Nlinkers
@@ -722,11 +725,13 @@ class TriLmp():
         #                  EXTENSION: DPD MULTIVALENCY                         #
         ########################################################################
         self.dpdmultivalency = dpdmultivalency
+        self.dpdmultivalent_linker_length=dpdmultivalent_linker_length
+        self.dpdmultivalent_linker_stiffness=dpdmultivalent_linker_stiffness
+        self.dpdmultivalent_hybridization_stiffness=dpdmultivalent_hybridization_stiffness
+        self.dpdmultivalent_hybridization_length=dpdmultivalent_hybridization_length
+        self.dpdmultivalent_bonds = dpdmultivalent_bonds
+
         if dpdmultivalency:
-            self.dpdmultivalent_linker_length=dpdmultivalent_linker_length
-            self.dpdmultivalent_linker_stiffness=dpdmultivalent_linker_stiffness
-            self.dpdmultivalent_hybridization_stiffness=dpdmultivalent_hybridization_stiffness
-            self.dpdmultivalent_hybridization_length=dpdmultivalent_hybridization_length
             n_bond_types+=2 # 2 new bond types, one for the creation of the valency and one for the linkers 
             n_tethers=dpdNlinkers
             self.Nlinkers = dpdNlinkers
@@ -778,11 +783,14 @@ class TriLmp():
         self.fix_rigid_symbiont_coordinates = fix_rigid_symbiont_coordinates
         self.fix_rigid_symbiont_nparticles  =   0
         self.fix_rigid_symbiont_flag        = 0
-
-        if self.fix_rigid_symbiont:
+        if self.fix_rigid_symbiont_coordinates is not None:
             self.fix_rigid_symbiont_nparticles  = len(self.fix_rigid_symbiont_coordinates)
-            self.fix_rigid_symbiont_interaction = fix_rigid_symbiont_interaction
-            self.fix_rigid_symbiont_params      = fix_rigid_symbiont_params
+        else:
+            self.fix_rigid_symbiont_nparticles = 0
+        self.fix_rigid_symbiont_interaction = fix_rigid_symbiont_interaction
+        self.fix_rigid_symbiont_params      = fix_rigid_symbiont_params
+        
+        if self.fix_rigid_symbiont:
             self.fix_rigid_symbiont_flag        = 1
 
             if len(self.fix_rigid_symbiont_params)<1:
@@ -839,6 +847,11 @@ class TriLmp():
 
         # if we want to have angles in the system
         angle_style_text=""
+        self.add_angles = add_angles
+        self.n_angle_types = n_angle_types
+        self.angles_total = angles_total
+        self.angle_triplets = angle_triplets
+
         if add_angles:
             atom_style_text = "full" # molecular (we need dihedrals) + charge
             angle_style_text = f"angle/types {n_angle_types}"
@@ -948,7 +961,7 @@ class TriLmp():
         self.n_edges = self.edges.shape[0]
 
         # if no restart file has been provided
-        if restart_file is None and initialize:
+        if restart_file is None:
 
             # create initialization file
             with open('sim_setup.in', 'w') as f:
@@ -2497,6 +2510,7 @@ class TriLmp():
                     else:
                         self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
 
+            """
             # compute the amplitudes of the spherical harmonics
             if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and compute_amplitudes_on_the_fly:
                 
@@ -2545,7 +2559,7 @@ class TriLmp():
                         if amplitude_turn_on is not None:
                             for command in amplitude_turn_on:
                                 self.lmp.command(command)
-                            
+            """                        
 
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
@@ -2901,7 +2915,8 @@ class TriLmp():
     ############################################################################
 
     def __reduce__(self):
-        return self.__class__,(self.initialize,
+        return self.__class__,(
+                self.initialize,
                 self.debug_mode,
                 self.num_particle_types,
                 self.mass_particle_type,
@@ -2987,6 +3002,41 @@ class TriLmp():
                 self.beads.bead_sizes,
                 self.beads.types,
                 self.n_bond_types,
+                self.self_propelled,
+                self.multivalency,
+                self.multivalent_linker_length,
+                self.multivalent_linker_stiffness,
+                self.multivalent_hybridization_length,
+                self.multivalent_hybridization_stiffness,
+                self.multivalent_bonds,
+                self.Nlinkers,
+                self.dpdmultivalency,
+                self.dpdmultivalent_linker_length,
+                self.dpdmultivalent_linker_stiffness,
+                self.dpdmultivalent_hybridization_length,
+                self.dpdmultivalent_hybridization_stiffness,
+                self.dpdmultivalent_bonds,
+                self.dpdNlinkers,
+                self.slayer,
+                self.slayer_points,
+                self.slayer_bonds,
+                self.slayer_dihedrals,
+                self.slayer_kbond,
+                self.slayer_kdihedral,
+                self.slayer_rlbond,
+                self.fix_rigid_symbiont, 
+                self.fix_rigid_symbiont_coordinates,
+                self.fix_rigid_symbiont_interaction,   
+                self.fix_rigid_symbiont_params, 
+                self.heterogeneous_membrane,
+                self.heterogeneous_membrane_id,
+                self.test_mode,
+                self.add_angles,
+                self.n_angle_types,
+                self.angles_total,
+                self.angle_triplets,
+                self.generate_pickles,
+                self.restart_file
                 )
     
     def __getstate__(self):
