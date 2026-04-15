@@ -1,19 +1,16 @@
 ################################################################################
-# TriLmp: TRIMEM (Siggel et. al, 2023) + LAMMPS                                #
+# TriLMP: TRIMEM (Siggel et. al, 2023) + LAMMPS                                #
 # Enabling versatile MD simulations w/dynamically triangulated membranes       #
-#                                                                              #
-# This program was originally created during the summer of 2023                #
-# by Michael Wassermair during an internship in the Saric Group (ISTA).        #
-# It is based on TRIMEM (Siggel et al.), which was originally intended         #
+# -----------------------------------------------------------------------------#
+# This program was originally developed during the summer of 2023              #
+# by M. Wassermair and M. Amaral during an internship in                       #
+# the Saric Group (ISTA). The restructuring, documentation and extension of    #
+# the code to simulate different soft matter & biological scenarios is         #
+# due to M. Muñoz-Basagoiti.                                                   #
+# -----------------------------------------------------------------------------#
+# TriLMp is based on TRIMEM (Siggel et al.), which was originally intended     #
 # to perform Hybrid Monte Carlo (HMC) energy minimization of the Helfrich      #
-# Hamiltonian using a vertex-averaged triangulated mesh discretisation.        #
-# By connecting the latter with LAMMPS, we expose the mesh vertices            #
-# (pseudo-particles). This allows us to perform simulations of a               #
-# triangulated membrane under different scenarios, detailed below.             #                                                
-#                                                                              #
-# The program depends on a modified version of trimem and LAMMPS that uses     #
-# specific packages and the additional pair_styles nonreciprocal               #
-# and nonreciprocal/omp (see SETUP_GUIDE.txt and HowTo_TriLMP.md for details)  #
+# Hamiltonian using a vertex-averaged triangulated mesh discretisation.        #                                                
 #                                                                              #
 # ORIGINAL PROGRAM STRUCTURE                                                   #
 # - Internal classes used by TriLmp                                            #
@@ -27,7 +24,8 @@
 # --- LAMMPS initialisation                                                    #
 # ---+++ Creating instances of lmp                                             #
 # ---+++ Setting up Basic system                                               #
-# ---+++ Calling Lammps functions to set thermostat and interactions           #
+# Additional LAMMPS functions (thermostat, interactions, integrators...)       #
+# should be introduced from the outside, for transparency.                     #
 #                                                                              #
 # --- FLIPPING Functions                                                       #
 # --- HMC/MD Functions + Wrapper Functions used on TRIMEM side                 #
@@ -38,7 +36,8 @@
 # --- Pickle + Checkpoint Utility                                              #
 # --- LAMMPS scrips used for setup                                             #
 #                                                                              #
-# The code has been restructured and rewritten by Maitane Munoz Basagoiti      #
+# NOTE THAT:                                                                   #
+# The code has been restructured and rewritten by M. Muñoz-Basagoiti           #
 # after its initial implementation. The TriLMP class has been reduced to its   #
 # minimum with the goal of having a more organic coupling to LAMMPS. The       #
 # main motivation of this rewriting was to improve code readability, make      #
@@ -48,7 +47,8 @@
 # The code is stored in a GitHub repository. It is therefore subjected to      #
 # version control. Should you be interested in checking older versions,        #
 # please refer to that.                                                        #
-#                                                                              #             
+# -----------------------------------------------------------------------------#           
+# (OUTDATED - More functionalities available now)                              #
 # CURRENT TRILMP FUNCTIONALITIES                                               #
 # 1. Triangulated vesicle in solution                                          #
 #   1.1. Tube pulling experiment                                               #
