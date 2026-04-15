@@ -4,9 +4,9 @@ TriLMP couples [**TriMEM**](https://github.com/bio-phys/trimem) to [LAMMPS](http
 membranes according to the Helfrich theory[^Helfrich1973]. Please refer to Siggel et al.[^Siggel2022] for details on the Hamiltonian simulated, or the [TriMEM documentation](https://trimem.readthedocs.io/en/latest/) further information on TriMEM (e.g., dependencies).
 
 ## Basic introduction
-In TriLMP, the Dynamically Triangulated network representing the membrane is a LAMMPS molecule made of particles (network vertices) that are connected through bonds (network edges). Throughout the simulation, TriLMP uses TriMEM to compute the Helfrich Hamiltonian, as well as to obtain the list of edges that have to be updated to ensure membrane fluidity. At each MD simulation step, TriMEM provides the gradient of the Helfrich Hamiltonian. These gradients are added to the forces acting on the vertices in the network. At a prescribed frequency (see TriLMP docs), TriLMP informs LAMMPS to update the network connectivity by removing and creating new bonds between vertices in the network. Additionally, the calculation of the surface repulsion, which prevents the network from self-intersecting, is dealt with by LAMMPS instead of TriMEM in TriLMP. For further details on how to use the package, please refer to the HowTo_TriLMP.md file.
+In TriLMP, the Dynamically Triangulated network representing the membrane is a LAMMPS molecule made of particles (network vertices) that are connected through bonds (network edges). Throughout the simulation, TriLMP uses TriMEM to compute the Helfrich Hamiltonian, as well as to obtain the list of edges that have to be updated to ensure membrane fluidity. At each MD simulation step, TriMEM provides the gradient of the Helfrich Hamiltonian. These gradients are added to the forces acting on the vertices in the network. At a prescribed frequency (see TriLMP docs), TriLMP informs LAMMPS to update the network connectivity by removing and creating new bonds between vertices in the network. Additionally, the calculation of the surface repulsion, which prevents the network from self-intersecting, is dealt with by LAMMPS instead of TriMEM in TriLMP. For further details on how to use the package, please refer to the ```TriLMP_GuidesAndHelp/HowTo_TriLMP.md``` file.
 
-To run simulations with TriLMP, you will be creating an object of the class ```TriLmp```. While you can always edit the class in the trilmp.py file in `src/` for details), to run a basic simulation you will just have to
+To run simulations with TriLMP, you will be creating an object of the class ```TriLmp```. While you can always edit the class in the trilmp.py file in `src/` for details, to run a basic simulation you will just have to
 1. Pass to your ```TriLmp``` object the class attributes you want (e.g., membrane mechanical properties, size of the network, ...)
 2. Call the ```TriLmp.run(params)``` method to actually run the simulation
 
@@ -163,9 +163,9 @@ make install-python
 
 ## 5. Testing your installation
 
-Try running the examples in ```example/examples_2026``` to check whether you have installed TriLMP correctly. To run them, use
+Try running the examples in ```TriLMP_Examples/examples_2026``` to check whether you have installed TriLMP correctly. To run them, use
 
 ```
-cd example/examples_2026/example_yourchoice
+cd TriLMP_Examples/examples_2026/example_yourchoice
 python launch_nameexample.py
 ```
