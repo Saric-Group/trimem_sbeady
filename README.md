@@ -1,10 +1,10 @@
 # TriLMP = TriMEM + LAMMPS
 
-**TriLMP** is a modified version of the [**TriMEM**](https://github.com/bio-phys/trimem) python package. It performs Hybrid Monte Carlo (HMC) simulations of lipid
-membranes according to the Helfrich theory[^Helfrich1973]. Please refer to Siggel et al.[^Siggel2022] for details on the specific Hamiltonian simulated, or the [TriMEM documentation](https://trimem.readthedocs.io/en/latest/) further information on the TriMEM package.
+TriLMP couples [**TriMEM**](https://github.com/bio-phys/trimem) to [LAMMPS](https://github.com/lammps/lammps) via the python interface of the latter, to perform Hybrid Monte Carlo (HMC = MD + MC) simulations of lipid
+membranes according to the Helfrich theory[^Helfrich1973]. Please refer to Siggel et al.[^Siggel2022] for details on the Hamiltonian simulated, or the [TriMEM documentation](https://trimem.readthedocs.io/en/latest/) further information on TriMEM (e.g., dependencies).
 
 ## Basic introduction
-TriLMP couples TriMEM to [LAMMPS](https://github.com/lammps/lammps) via the python interface of the latter. Within TriLMP, the Dynamically Triangulated network (DTN) is a LAMMPS molecule made of particles (network vertices) that are connected through bonds (network edges). Throughout the simulation, TriLMP uses TriMEM to compute the Helfrich Hamiltonian as well as to obtain the list of vertices that have to be updated to ensure membrane fluidity. At each MD simulation step, TriMEM provides the force acting on each vertex in the network to LAMMPS so that vertices in the network move according to LAMMPS' time-integrators (e.g., velocity-Verlet). At a prescribed frequency (see TriLMP docs), TriLMP informs LAMMPS to update the network connectivity by removing and creating new bonds between particles in the molecule. Additionally, the calculation of the surface repulsion, which prevents the network from self-intersecting, is dealt with by LAMMPS instead of TriMEM in TriLMP. For further details on how to use the package, please refer to the HowTo_TriLMP.md file.
+In TriLMP, the Dynamically Triangulated network representing the membrane is a LAMMPS molecule made of particles (network vertices) that are connected through bonds (network edges). Throughout the simulation, TriLMP uses TriMEM to compute the Helfrich Hamiltonian, as well as to obtain the list of edges that have to be updated to ensure membrane fluidity. At each MD simulation step, TriMEM provides the gradient of the Helfrich Hamiltonian. These gradients are added to the forces acting on the vertices in the network. At a prescribed frequency (see TriLMP docs), TriLMP informs LAMMPS to update the network connectivity by removing and creating new bonds between vertices in the network. Additionally, the calculation of the surface repulsion, which prevents the network from self-intersecting, is dealt with by LAMMPS instead of TriMEM in TriLMP. For further details on how to use the package, please refer to the HowTo_TriLMP.md file.
 
 To run simulations with TriLMP, you will be creating an object of the class ```TriLmp```. While you can always edit the class in the trilmp.py file in `src/` for details), to run a basic simulation you will just have to
 1. Pass to your ```TriLmp``` object the class attributes you want (e.g., membrane mechanical properties, size of the network, ...)
@@ -20,12 +20,10 @@ To run simulations with TriLMP, you will be creating an object of the class ```T
 
 ## Installation guide
 
-TriLMP has been successfully installed and tested in Linux. Members of the group have managed to install and run TriLMP on MAC OS (Sonoma). However, the installation guide detailed below might not work for such OS. Whenever possible, we recommend the installation in Linux. We are currently working on making the software easy to install in MAC OS.
+TriLMP has been successfully installed and tested in Linux and MAC OS.
 
-We suggest installing TriLmp in a conda environment and then install trimem/trilmp as a editable install.
-This allows you to alter trilmp functionality by directly tinkering with the src/trimem/trilmp.py file if needed.
-This can come in handy in case you need to define or initialize a simulation set-up that is not covered by the current version of TriLMP.
-The code is designed such that additional LAMMPS commands can always be passed as command strings once the ```trilmp``` object has been created.
+We suggest installing TriLmp in a conda environment, and then installing trimem/trilmp as an editable install, which allows you to alter the ```TriLmp``` functionality by directly tinkering with the src/trimem/trilmp.py file if needed.
+This can come in handy in case you need to define or initialize a simulation set-up that is not covered by the current version of TriLMP. The code is designed such that additional LAMMPS commands can always be passed as command strings once the ```TriLmp``` object has been created.
 
 ### 1. Downloading the repository
 
@@ -51,9 +49,9 @@ conda activate Trienv
 ```
 
 ### 3. Installing TriMEM/TriLMP
-TriLMP can be installed using pip as follows: 
+TriLMP can be installed using pip as follows (the editable install we were mentioning above): 
 
-```
+```bash
  pip install -e .
 ```
 
@@ -62,8 +60,12 @@ Build and compile the shared libraries using:
 python setup.py build
 ```
 
-Note that this folder will be the actual location of the modules with an editable install, i.e., if you change something in the python code here, effects will be immediate. In case you want to change something on the c++ side of the code, make sure to run "python3 setup.py build" in order to to compile and copy 
-the libaries to the src/trimem folder as described below.
+Note that this folder will be the actual location of the modules with an editable install, i.e., if you change something in the python code here, effects will be immediate. In case you want to change something on the c++ side of the code, make sure to run 
+```bash
+python3 setup.py build
+```
+in order to to compile and copy 
+the libaries to the `src/trimem` folder as described below.
 
 Finally some shared libraries have to be copied manually from the _skbuild folder. To do so, run
 
@@ -71,7 +73,7 @@ Finally some shared libraries have to be copied manually from the _skbuild folde
 . copy_libs.sh
 ```
 
-In Linux you may have to manually the copy the libraries by using:
+In Linux, you may have to manually the copy the libraries by using:
 
 ```
 cp _skbuild/linux-x86_64-3.11/cmake-build/core.cpython-311-x86_64-linux-gnu.so src/trimem/.
@@ -83,19 +85,15 @@ Depending on what changes you do to the C part of the code, you might need to co
 
 ### 4. Installing LAMMPS
 
-LAMMPS has to be installed using python shared libraries and some specific packages.
-If you already have LAMMPS you might have to recompile it. In any case you will have to 
-perform the python install using your Trienv environment as we detail below. Saric group members are working on a patched LAMMPS version that should be available soon.
+LAMMPS has to be installed using python shared libraries and some specific packages. Therefore, if you already have LAMMPS you might have to recompile it. In any case you will have to 
+perform the python install using your Trienv environment as we detail below. Saric group members are working on a patched LAMMPS version that is available within the GitHub of the group. You can choose to clone this repository, or instead use the latest stable release from LAMMPS directly.
 
-Go back to the directory where you want to have your install folder and get lammps from git by running
-
+For example, here we clone the lastest LAMMPS stable release. To do so, go back to the directory where you want to have your install folder and run
 ```bash
 git clone -b stable https://github.com/lammps/lammps.git lammps
 ```
 
-In the future, we will add the LAMMPS version the team has worked on as a submodule.
-
-We can now start installing LAMMPS. Go first to the ```lammps``` directory and create the ```build``` folder.
+We can now start manually installing LAMMPS. Go first to the ```lammps``` directory and create the ```build``` folder.
 ```bash
 cd lammps                
 mkdir build
@@ -112,14 +110,14 @@ print(sys.executable)
 which should print something like 
 
 ```bash
-/nfs/scistore15/saricgrp/mmunozba/.conda/envs/Trienv/bin/python
+/nfs/scistore15/saricgrp/yourusername/.conda/envs/Trienv/bin/python
 ```
-and will be referred to as "python_path" in the next bash command. Note that this enables PyLammps in this specific conda environment only! 
+and will be referred to as ```python_path``` in the next bash command. Note that this enables PyLammps in this specific conda environment only! 
 
 Now we can set up the makefiles and build LAMMPS. The command line you see below is a suggestion for the LAMMPS packages you may want to compile for tests (these are suggested here because they have proved useful in the past in the development of works involving TriLMP).
 
 ```
-cmake -D BUILD_OMP=yes -D BUILD_SHARED_LIBS=yes -D PYTHON_EXECUTABLE="/nfs/scistore15/saricgrp/mmunozba/.conda/envs/Trienv/bin/python" -D PKG_PYTHON=yes -D PKG_OPENMP=yes -D PKG_MOLECULE=yes  -D PKG_EXTRA-PAIR=yes -D PKG_EXTRA-FIX=yes -D PKG_EXTRA-COMPUTE=yes -D PKG_RIGID=yes -D PKG_ASPHERE=yes -D PKG_BROWNIAN=yes -D PKG_MC=yes -D PKG_REACTION=yes ../cmake 
+cmake -D BUILD_OMP=yes -D BUILD_SHARED_LIBS=yes -D PYTHON_EXECUTABLE="/nfs/scistore15/saricgrp/yourusername/.conda/envs/Trienv/bin/python" -D PKG_PYTHON=yes -D PKG_OPENMP=yes -D PKG_MOLECULE=yes  -D PKG_EXTRA-PAIR=yes -D PKG_EXTRA-FIX=yes -D PKG_EXTRA-COMPUTE=yes -D PKG_RIGID=yes -D PKG_ASPHERE=yes -D PKG_BROWNIAN=yes -D PKG_MC=yes -D PKG_REACTION=yes ../cmake 
 cmake --build .
 ```
 
@@ -133,8 +131,13 @@ Roughly, this is what some of these packages can be useful for:
 
 If you are missing specific packages or you want to extend your installation, you can always come back and recompile LAMMPS with additional packages.
 
-For HPC clusters: If you try the above compilation and it is not working, try loading the openmpi module first by typing ```module load openmpi``` in the cluster.
+**IMPORTANT NOTE**
+For the LAMMPS compilation to work, you will need OpenMPI and OpenMP libraries. OpenMPI takes care of the distributed memory parallelization, and OpenMP of the shared memory parallelization. If you use the ```environment.yml``` file to create your conda environment, it includes these libraries through ```mpich``` and ```llvm-openmp```. 
 
+Errors can arise when LAMMPS tries to find the OpenMPI library. Therefore, a couple of hints that may help:
+- In the cluster/LINUX: If you try the above compilation and it doesn't work, try loading the openmpi module first by typing ```module load openmpi```
+- In the cluster/LINUX/MAC OS: If you the above compilation, and you are certain that you have an OpenMPI library (you can test this with ```which openmpi``` or ```which mpicc```), you may need to add the ```-D MPI_C_COMPILER=$(which mpicc) -D MPI_CXX_COMPILER=$(which mpicxx)``` flags to the ```cmake``` build. Sometimes, you may need to specify the path to the libraries explicitly through flags like: ```-D MPI_C_COMPILER=path_in_your_system  -D MPI_CXX_COMPILER=path_in_your_system   -D MPI_C_LIBRARIES=path_in_your_system   -D MPI_CXX_LIBRARIES=path_in_your_system```.
+  
 Finally to make LAMMPS accessible for python, i.e. making and copying the shared libaries, use
 
 ```bash
@@ -149,34 +152,3 @@ Try running the examples in ```example/examples_2024``` to check whether you hav
 cd example/examples_2024
 python launch_nameexample.py
 ```
-
-### Dependencies
-
-This information has been copied from TriMEM's documentation. 
-
-TriMEM builds upon the generic mesh data structure
-[OpenMesh](https://www.graphics.rwth-aachen.de/software/openmesh/), which
-is included as a submodule that is pulled in upon `git clone` via the
-`--recurse-submodules` flag.
-
-For the efficient utilization of shared-memory parallelism, TriMEM makes
-use of the [OpenMP](https://www.openmp.org/) application programming model
-(`>= v4.5`) and modern `C++`. It thus requires relatively up-to-date
-compilers (supporting at least `C++17`).
-
-If not already available, the following python dependencies will be
-automatically installed:
-
-* numpy
-* scipy
-* h5py
-* meshio
-* psutil
-
-Documentation and tests further require:
-
-* autograd
-* trimesh
-* sphinx
-* sphinx-copybutton
-* sphinxcontrib-programoutput
