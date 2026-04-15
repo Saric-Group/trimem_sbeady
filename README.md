@@ -42,10 +42,12 @@ To set up a conda environment including some prerequisites use:
 conda env create -f environment.yml
 ```
 
-Within the ```environment.yml``` file you can choose the name you want for your environment. Here we will call it ```Trienv```. Make sure that the environment is activated throughout the rest of the setup! For that, type
+You can find more info on the prerequisites in the [TriMEM documentation](https://trimem.readthedocs.io/en/latest/).
+
+Within the ```environment.yml``` file you can choose the name you want for your environment. Here we will call it ```env_TriLMP```. Make sure that the environment is activated throughout the rest of the setup! For that, type
 
 ```
-conda activate Trienv
+conda activate env_TriLMP
 ```
 
 ### 3. Installing TriMEM/TriLMP
@@ -61,10 +63,15 @@ python setup.py build
 ```
 
 (MAC users) If you have a problem with this step due to ```OpenMesh```, you might have to change the line
-```cmake_minimum_required(VERSION 3.1.0 FATAL_ERROR)```
+```
+cmake_minimum_required(VERSION 3.1.0 FATAL_ERROR)
+```
 for 
-```cmake_minimum_required(VERSION 3.5.0 FATAL_ERROR)```
-within ```OpenMesh/CMakeLists.txt```.
+```
+cmake_minimum_required(VERSION 3.5.0 FATAL_ERROR)
+```
+
+within the file ```OpenMesh/CMakeLists.txt```.
 
 
 Note that this folder will be the actual location of the modules with an editable install, i.e., if you change something in the python code here, effects will be immediate. In case you want to change something on the c++ side of the code, make sure to run 
@@ -92,8 +99,7 @@ Depending on what changes you do to the C part of the code, you might need to co
 
 ### 4. Installing LAMMPS
 
-LAMMPS has to be installed using python shared libraries and some specific packages. Therefore, if you already have LAMMPS you might have to recompile it. In any case you will have to 
-perform the python install using your Trienv environment as we detail below. Saric group members are working on a patched LAMMPS version that is available within the GitHub of the group. You can choose to clone this repository, or instead use the latest stable release from LAMMPS directly.
+TriLMP requires LAMMPS, which has to be installed using python shared libraries and some specific packages. You will have to perform the python install using your ```env_TriLMP``` environment as we detail below. Šarić group members are working on a patched LAMMPS version that is available within the GitHub of the group. You can choose to clone this repository, or instead use the latest stable release from LAMMPS directly.
 
 For example, here we clone the lastest LAMMPS stable release. To do so, go back to the directory where you want to have your install folder and run
 ```bash
@@ -124,7 +130,7 @@ and will be referred to as ```python_path``` in the next bash command. Note that
 Now we can set up the makefiles and build LAMMPS. The command line you see below is a suggestion for the LAMMPS packages you may want to compile for tests (these are suggested here because they have proved useful in the past in the development of works involving TriLMP).
 
 ```
-cmake -D BUILD_OMP=yes -D BUILD_SHARED_LIBS=yes -D PYTHON_EXECUTABLE="/nfs/scistore15/saricgrp/yourusername/.conda/envs/Trienv/bin/python" -D PKG_PYTHON=yes -D PKG_OPENMP=yes -D PKG_MOLECULE=yes  -D PKG_EXTRA-PAIR=yes -D PKG_EXTRA-FIX=yes -D PKG_EXTRA-COMPUTE=yes -D PKG_RIGID=yes -D PKG_ASPHERE=yes -D PKG_BROWNIAN=yes -D PKG_MC=yes -D PKG_REACTION=yes ../cmake 
+cmake -D BUILD_OMP=yes -D BUILD_SHARED_LIBS=yes -D PYTHON_EXECUTABLE="/nfs/scistore15/saricgrp/yourusername/.conda/envs/env_TriLMP/bin/python" -D PKG_PYTHON=yes -D PKG_OPENMP=yes -D PKG_MOLECULE=yes  -D PKG_EXTRA-PAIR=yes -D PKG_EXTRA-FIX=yes -D PKG_EXTRA-COMPUTE=yes -D PKG_RIGID=yes -D PKG_ASPHERE=yes -D PKG_BROWNIAN=yes -D PKG_MC=yes -D PKG_REACTION=yes ../cmake 
 cmake --build .
 ```
 
@@ -139,11 +145,13 @@ Roughly, this is what some of these packages can be useful for:
 If you are missing specific packages or you want to extend your installation, you can always come back and recompile LAMMPS with additional packages.
 
 **IMPORTANT NOTE**
-For the LAMMPS compilation to work, you will need OpenMPI and OpenMP libraries. OpenMPI takes care of the distributed memory parallelization, and OpenMP of the shared memory parallelization. If you use the ```environment.yml``` file to create your conda environment, it includes these libraries through ```mpich``` and ```llvm-openmp```. 
 
-Errors can arise when LAMMPS tries to find the OpenMPI library. Therefore, a couple of hints that may help:
-- In the cluster/LINUX: If you try the above compilation and it doesn't work, try loading the openmpi module first by typing ```module load openmpi```
-- In the cluster/LINUX/MAC OS: If you the above compilation, and you are certain that you have an OpenMPI library (you can test this with ```which openmpi``` or ```which mpicc```), you may need to add the ```-D MPI_C_COMPILER=$(which mpicc) -D MPI_CXX_COMPILER=$(which mpicxx)``` flags to the ```cmake``` build. Sometimes, you may need to specify the path to the libraries explicitly through flags like: ```-D MPI_C_COMPILER=path_in_your_system  -D MPI_CXX_COMPILER=path_in_your_system   -D MPI_C_LIBRARIES=path_in_your_system   -D MPI_CXX_LIBRARIES=path_in_your_system```.
+For the LAMMPS compilation to work, you will need OpenMPI and OpenMP libraries. OpenMPI takes care of the distributed memory parallelization, while OpenMP deals with shared memory parallelization. If you use the ```environment.yml``` file to create your conda environment, it includes these libraries through ```mpich``` and ```llvm-openmp```. 
+
+Errors can arise when LAMMPS tries to find the OpenMPI library. Therefore, a couple of hints that may help are:
+
+- *In the cluster/LINUX*: If you try the above compilation and it doesn't work, try loading the openmpi module first by typing ```module load openmpi```
+- *In the cluster/LINUX/MAC OS*: If you the above compilation, and you are certain that you have an OpenMPI library (you can test this with ```which openmpi``` or ```which mpicc```), you may need to add the ```-D MPI_C_COMPILER=$(which mpicc) -D MPI_CXX_COMPILER=$(which mpicxx)``` flags to the ```cmake``` build. Sometimes, you may need to specify the path to the libraries explicitly through flags like: ```-D MPI_C_COMPILER=path_in_your_system  -D MPI_CXX_COMPILER=path_in_your_system   -D MPI_C_LIBRARIES=path_in_your_system   -D MPI_CXX_LIBRARIES=path_in_your_system```.
   
 Finally to make LAMMPS accessible for python, i.e. making and copying the shared libaries, use
 
