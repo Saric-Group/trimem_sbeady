@@ -153,7 +153,7 @@ For the LAMMPS compilation to work, you will need OpenMPI and OpenMP libraries. 
 Errors can arise when LAMMPS tries to find the OpenMPI library. Therefore, a couple of hints that may help are:
 
 - *In the cluster/LINUX*: If you try the above compilation and it doesn't work, try loading the openmpi module first by typing ```module load openmpi```
-- *In the cluster/LINUX/MAC OS*: If you the above compilation, and you are certain that you have an OpenMPI library (you can test this with ```which openmpi``` or ```which mpicc```), you may need to add the ```-D MPI_C_COMPILER=$(which mpicc) -D MPI_CXX_COMPILER=$(which mpicxx)``` flags to the ```cmake``` build. Sometimes, you may need to specify the path to the libraries explicitly through flags like: ```-D MPI_C_COMPILER=path_in_your_system  -D MPI_CXX_COMPILER=path_in_your_system   -D MPI_C_LIBRARIES=path_in_your_system   -D MPI_CXX_LIBRARIES=path_in_your_system```.
+- *In the cluster/LINUX/MAC OS*: If you try the above compilation and it fails, and you are certain that you have an OpenMPI library (you can test this with ```which openmpi``` or ```which mpicc```), you may need to add the ```-D MPI_C_COMPILER=$(which mpicc) -D MPI_CXX_COMPILER=$(which mpicxx)``` flags to the ```cmake``` build. Sometimes, you may need to specify the path to the libraries explicitly through flags like: ```-D MPI_C_COMPILER=path_in_your_system  -D MPI_CXX_COMPILER=path_in_your_system   -D MPI_C_LIBRARIES=path_in_your_system   -D MPI_CXX_LIBRARIES=path_in_your_system```.
   
 Finally to make LAMMPS accessible for python, i.e. making and copying the shared libaries, use
 
