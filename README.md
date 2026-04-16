@@ -169,3 +169,7 @@ Try running the examples in ```TriLMP_Examples/examples_2026``` to check whether
 cd TriLMP_Examples/examples_2026/example_yourchoice
 python launch_nameexample.py
 ```
+
+## 6. Updating the code and adding new functionalities
+
+If you want to edit the ```TriLMP``` code to add new simulation functionalities, edit the ```src/trimem/mc/trilmp.py``` file.
