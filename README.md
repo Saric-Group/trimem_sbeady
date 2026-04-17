@@ -173,3 +173,10 @@ python launch_nameexample.py
 ## 6. Updating the code and adding new functionalities
 
 If you want to edit the ```TriLMP``` code to add new simulation functionalities, edit the ```src/trimem/mc/trilmp.py``` file.
+
+## Authors
+
+- Maitane Muñoz-Basagoiti [@maitane-muba](https://github.com/maitane-muba)
+- Michael Wassermair [@watermair](https://github.com/watermair)
+- Miguel Amaral [@lasergyro](https://github.com/lasergyro)
+  
