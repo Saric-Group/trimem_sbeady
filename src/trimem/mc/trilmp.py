@@ -1821,7 +1821,7 @@ class TriLmp():
             frequency_amplitudes_on_the_fly=100, amplitude_shut_down = None, amplitude_turn_on = None,
             lmax = 15, carpet = False, halt_based_on_distance = False, halt_distance = 0,
             flat_multivalency = False, pickle_frequency = 1000, with_aux = False,
-            simplegcmc = False,
+            simplegcmc = False, step_unfix_reactions = None, new_reaction_commands = None
         ):
 
         print("Starting a TriLMP run...")
@@ -1912,9 +1912,7 @@ class TriLmp():
 
         # we just want to evaluate a configuration and exit the run
         if evaluate_configuration:
-            # do not integrate equations of motion, just evaluate
             self.lmp.command(f'run 0')
-            # exit - do not continue running
             return
         
         if self.restart_file is not None:
@@ -1930,14 +1928,12 @@ class TriLmp():
             print("THERMALIZATION DONE. INITIALIZING FROM A RESTART.")
             #return
 
-        # run simulation for dictated number
-        # of MD steps
+        # run simulation for dictated number of MD steps
         while self.MDsteps<N:
             
-            # get what is the actual simulation time right now
+            # actual simulation time
             self.time_force = self.MDsteps * self.traj_steps
-
-            # counter for updates and so on
+            # counter for updates
             i+=1
 
             # the program MC + MD
@@ -1946,11 +1942,6 @@ class TriLmp():
             self.callback(np.copy(self.mesh.x),self.counter)
             self.flip_info()
             
-            # small verification to check that mesh remains a manifold
-            # i.e. that satisfied Euler characteristic chi = V - E + F
-            #print(f"NUMBER OF FACES: {len(self.mesh.f)}")
-            #print(f"Faces {self.mesh.f}")
-
             # check if simulation must stop
             self.halt_symbiont_simulation(self.MDsteps, check_outofrange, check_outofrange_freq, check_outofrange_cutoff)
 
@@ -2002,6 +1993,113 @@ class TriLmp():
                 # add the particles that we found are within range
                 for i in range(len(indexes)):
                     self.lmp.command(f'group tip id {indexes[i]+1}')
+
+            # evaluation of inside of membrane and application of corresponding protocol
+            if evaluate_inside_membrane:
+                
+                # extract the particle coordinates
+                pos_alloc=self.lmp.numpy.extract_atom("x")
+
+                # extract the atom types --> 
+                # this should give me the IDs in a consistent manner
+                types_atoms = self.lmp.numpy.extract_atom("type")
+                
+                # [DEBUGGING PURPOSES]
+                #print("TYPES ATOMS: ", types_atoms)
+                #print("TYPES ATOMS SUPPOSEDLY MEMBRANE: ", types_atoms[:self.n_vertices])
+                #print("CHECK IF ALL THOSE ATOMS ARE TYPE 1", np.any(types_atoms[:self.n_vertices]!=1))
+                #if np.any(types_atoms[:self.n_vertices]!=1):
+                #    print("PROBLEM: THERE ARE NON 1 ATOMS WHERE YOU THOUGHT THERE SHOULDN'T BE")
+                #    wait = input()
+
+                if self.heterogeneous_membrane:
+                    type_for_ghost = 3
+                    type_for_reactant = 4
+                else:
+                    type_for_ghost = 2
+                    type_for_reactant = 3
+
+                # get the indexes of the ghost particles
+                ghost_particle_indexes = np.where(types_atoms == type_for_ghost)[0]
+                
+                # [DEBUGGING PURPOSES]
+                #print("GHOST PARTICLE INDEXES: ", ghost_particle_indexes)
+                #print("CHECK IF ALL THOSE ATOMS ARE TYPE 2", np.any(types_atoms[ghost_particle_indexes]!=2))
+                #if np.any(types_atoms[ghost_particle_indexes]!=2):
+                #    print("PROBLEM: THERE ARE NON 2 ATOMS WHERE YOU THOUGHT THERE SHOULDN'T BE")
+                #    wait = input()
+
+                # construct a trimesh mesh to compute the face normals and
+                # know where to position the ghost membrane
+                new_mesh = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f)
+                baricenters = new_mesh.triangles_center
+                face_normals = new_mesh.face_normals
+                compressed_membrane = baricenters - desired_interlayer_distance*face_normals
+
+                # inform lammps of the coordinates again
+                pos_alloc[ghost_particle_indexes] = compressed_membrane
+
+                if ghost_membrane_consumes:
+                    
+                    # [old implementation, it was giving some issues and not working as desired]
+                    #self.lmp.command(f'delete_atoms overlap {cutoff_consumption} metabolites ghostmem')
+
+                    # 1. find the limits of the membrane
+                    xmax = np.max(self.mesh.x[:, 0])
+                    xmin = np.min(self.mesh.x[:, 0])
+                    ymax = np.max(self.mesh.x[:, 1])
+                    ymin = np.min(self.mesh.x[:, 1])
+                    zmax = np.max(self.mesh.x[:, 2])
+                    zmin = np.min(self.mesh.x[:, 2])
+
+                    # get the indexes of the reactant particles
+                    reactant_particle_indexes = np.where(types_atoms == type_for_reactant)[0]
+
+                    # [FOR DEBUGGING PURPOSES]
+                    #print("REACTANT PARTICLE INDEXES: ", reactant_particle_indexes)
+                    #print("CHECK IF ALL THOSE ATOMS ARE TYPE 3", np.any(types_atoms[reactant_particle_indexes]!=3))
+                    #if np.any(types_atoms[reactant_particle_indexes]!=3):
+                    #    print("PROBLEM: THERE ARE NON 3 ATOMS WHERE YOU THOUGHT THERE SHOULDN'T BE")
+                    #    wait = input()
+
+                    # 2. only care about the reactants that have the potentially to be within cutoff
+                    # get the coordinates of the reactants
+                    coordinates_reactants = pos_alloc[reactant_particle_indexes]
+                    
+                    # get those reactants that are within limits
+                    index_selection = np.where((coordinates_reactants[:, 0]<xmax) & (coordinates_reactants[:, 0]>xmin) & (coordinates_reactants[:, 1]<ymax) & (coordinates_reactants[:, 1]>ymin) & (coordinates_reactants[:, 2]<zmax) & (coordinates_reactants[:, 2]>zmin))[0]
+                    selected_reactants = coordinates_reactants[index_selection]
+
+                    #print("THESE ARE THE INDEXES OF THE SELECTED REACTANTS: ", index_selection)
+                    
+                    # 3. find the overlapping guys
+                    # build a KD-tree for the points in the second group; compressed_membrane here is M_points
+                    kd_tree = KDTree(compressed_membrane)
+                    # query the KD-tree to find the nearest neighbor in M_points for each point in N_points
+                    distances, indices = kd_tree.query(selected_reactants)
+                    #print("THESE ARE THE DISTANCES: ", distances)
+                    # find the distances that are within interaction range
+                    index_overlap = np.where(distances<=cutoff_consumption)[0]
+
+                    if len(index_overlap)>0:
+
+                        ids_atoms = self.lmp.numpy.extract_atom("id")
+
+                        # get the indexes for the group
+                        index_group = ids_atoms[reactant_particle_indexes[index_selection[index_overlap]]]
+
+                        #print("WHAT IS INDEX GROUP: ", index_group)
+
+                        # start adding particles that have been selected inside the group
+                        for ig in range(len(index_group)):
+                            #print("POSITION OF THIS PARTICLE: ", pos_alloc[index_group[ig]])
+                            self.lmp.command(f'group consumeoverlapping id {index_group[ig]}')
+
+                        self.lmp.command(f'delete_atoms group consumeoverlapping compress no')
+                        
+                        # [DEBUGGING PURPOSES]
+                        #if len(index_group)>5:
+                        #    wait = input()
 
             # post equilibration update, if it applies
             if self.MDsteps==self.equilibration_rounds and self.equilibrated == False:
@@ -2151,374 +2249,282 @@ class TriLmp():
                     print("These are your current fixes: ")
                     print(self.L.fixes)
 
-            if (self.equilibrated) and (simplegcmc):
-                # change particle types in source and sink to establish a gradient
-                self.lmp.command('set region source type 3')
-                self.lmp.command('set region sink type 7')
+            # options once the system has equilibrated
+            if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)):
+                
+                # protocols that rely on LAMMPS commands which have to be added after equilibration
+                if step_dependent_protocol:
+                    # if it is the frequency at which we want to apply the protocol
+                    if (self.MDsteps % step_protocol_frequency == 0) and self.MDsteps!= oldsteps:
+                        if not alternating_protocol:
+                            # if we have not applied all protocol steps
+                            if applied_protocol<steps_in_protocol:
+                                for command in step_protocol_commands[applied_protocol]:
+                                    self.lmp.command(command)
+                                # check what is the protocol step that has been applied
+                                applied_protocol+=1 
+                        else:
 
-            # protocols that rely on LAMMPS commands which have to be added after equilibration
-            if (self.equilibrated) and (step_dependent_protocol):
-                # if it is the frequency at which we want to apply the protocol
-                if (self.MDsteps % step_protocol_frequency == 0) and self.MDsteps!= oldsteps:
-                    if not alternating_protocol:
-                        # if we have not applied all protocol steps
-                        if applied_protocol<steps_in_protocol:
                             for command in step_protocol_commands[applied_protocol]:
                                 self.lmp.command(command)
-                            # check what is the protocol step that has been applied
-                            applied_protocol+=1 
-                    else:
 
-                        for command in step_protocol_commands[applied_protocol]:
-                            self.lmp.command(command)
-
-                        if applied_protocol ==0:
-                            applied_protocol = 1
-                        else:
-                            applied_protocol = 0
-
-                oldsteps = self.MDsteps
-
-            # evaluation of inside of membrane and application of corresponding protocol
-            if evaluate_inside_membrane:
-                
-                # extract the particle coordinates
-                pos_alloc=self.lmp.numpy.extract_atom("x")
-
-                # extract the atom types --> 
-                # this should give me the IDs in a consistent manner
-                types_atoms = self.lmp.numpy.extract_atom("type")
-                
-                # [DEBUGGING PURPOSES]
-                #print("TYPES ATOMS: ", types_atoms)
-                #print("TYPES ATOMS SUPPOSEDLY MEMBRANE: ", types_atoms[:self.n_vertices])
-                #print("CHECK IF ALL THOSE ATOMS ARE TYPE 1", np.any(types_atoms[:self.n_vertices]!=1))
-                #if np.any(types_atoms[:self.n_vertices]!=1):
-                #    print("PROBLEM: THERE ARE NON 1 ATOMS WHERE YOU THOUGHT THERE SHOULDN'T BE")
-                #    wait = input()
-
-                if self.heterogeneous_membrane:
-                    type_for_ghost = 3
-                    type_for_reactant = 4
-                else:
-                    type_for_ghost = 2
-                    type_for_reactant = 3
-
-                # get the indexes of the ghost particles
-                ghost_particle_indexes = np.where(types_atoms == type_for_ghost)[0]
-                
-                # [DEBUGGING PURPOSES]
-                #print("GHOST PARTICLE INDEXES: ", ghost_particle_indexes)
-                #print("CHECK IF ALL THOSE ATOMS ARE TYPE 2", np.any(types_atoms[ghost_particle_indexes]!=2))
-                #if np.any(types_atoms[ghost_particle_indexes]!=2):
-                #    print("PROBLEM: THERE ARE NON 2 ATOMS WHERE YOU THOUGHT THERE SHOULDN'T BE")
-                #    wait = input()
-
-                # construct a trimesh mesh to compute the face normals and
-                # know where to position the ghost membrane
-                new_mesh = trimesh.Trimesh(vertices=self.mesh.x, faces=self.mesh.f)
-                baricenters = new_mesh.triangles_center
-                face_normals = new_mesh.face_normals
-                compressed_membrane = baricenters - desired_interlayer_distance*face_normals
-
-                # inform lammps of the coordinates again
-                pos_alloc[ghost_particle_indexes] = compressed_membrane
-
-                if ghost_membrane_consumes:
-                    
-                    # [old implementation, it was giving some issues and not working as desired]
-                    #self.lmp.command(f'delete_atoms overlap {cutoff_consumption} metabolites ghostmem')
-
-                    # 1. find the limits of the membrane
-                    xmax = np.max(self.mesh.x[:, 0])
-                    xmin = np.min(self.mesh.x[:, 0])
-                    ymax = np.max(self.mesh.x[:, 1])
-                    ymin = np.min(self.mesh.x[:, 1])
-                    zmax = np.max(self.mesh.x[:, 2])
-                    zmin = np.min(self.mesh.x[:, 2])
-
-                    # get the indexes of the reactant particles
-                    reactant_particle_indexes = np.where(types_atoms == type_for_reactant)[0]
-
-                    # [FOR DEBUGGING PURPOSES]
-                    #print("REACTANT PARTICLE INDEXES: ", reactant_particle_indexes)
-                    #print("CHECK IF ALL THOSE ATOMS ARE TYPE 3", np.any(types_atoms[reactant_particle_indexes]!=3))
-                    #if np.any(types_atoms[reactant_particle_indexes]!=3):
-                    #    print("PROBLEM: THERE ARE NON 3 ATOMS WHERE YOU THOUGHT THERE SHOULDN'T BE")
-                    #    wait = input()
-
-                    # 2. only care about the reactants that have the potentially to be within cutoff
-                    # get the coordinates of the reactants
-                    coordinates_reactants = pos_alloc[reactant_particle_indexes]
-                    
-                    # get those reactants that are within limits
-                    index_selection = np.where((coordinates_reactants[:, 0]<xmax) & (coordinates_reactants[:, 0]>xmin) & (coordinates_reactants[:, 1]<ymax) & (coordinates_reactants[:, 1]>ymin) & (coordinates_reactants[:, 2]<zmax) & (coordinates_reactants[:, 2]>zmin))[0]
-                    selected_reactants = coordinates_reactants[index_selection]
-
-                    #print("THESE ARE THE INDEXES OF THE SELECTED REACTANTS: ", index_selection)
-                    
-                    # 3. find the overlapping guys
-                    # build a KD-tree for the points in the second group; compressed_membrane here is M_points
-                    kd_tree = KDTree(compressed_membrane)
-                    # query the KD-tree to find the nearest neighbor in M_points for each point in N_points
-                    distances, indices = kd_tree.query(selected_reactants)
-                    #print("THESE ARE THE DISTANCES: ", distances)
-                    # find the distances that are within interaction range
-                    index_overlap = np.where(distances<=cutoff_consumption)[0]
-
-                    if len(index_overlap)>0:
-
-                        ids_atoms = self.lmp.numpy.extract_atom("id")
-
-                        # get the indexes for the group
-                        index_group = ids_atoms[reactant_particle_indexes[index_selection[index_overlap]]]
-
-                        #print("WHAT IS INDEX GROUP: ", index_group)
-
-                        # start adding particles that have been selected inside the group
-                        for ig in range(len(index_group)):
-                            #print("POSITION OF THIS PARTICLE: ", pos_alloc[index_group[ig]])
-                            self.lmp.command(f'group consumeoverlapping id {index_group[ig]}')
-
-                        self.lmp.command(f'delete_atoms group consumeoverlapping compress no')
-                        
-                        # [DEBUGGING PURPOSES]
-                        #if len(index_group)>5:
-                        #    wait = input()
-
-            # do gcmc by hand rather than using fix gcmc
-            if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and gcmc_by_hand:
-                
-                to_add = 0
-                to_delete = 0
-                
-                # --------------------
-                # SOURCE
-                # --------------------
-
-                if not self.multivalency:
-                    # count how many particles are there in the source
-                    particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
-
-                    # add needed particles in source (assuming reactants always last type)
-                    to_add = desired_particles_source - particles_source[-1]
-
-                    # if you need to add particles because there are not enough
-                    if to_add>0:
-                        if evaluate_inside_membrane:
-                            if self.heterogeneous_membrane:
-                                self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE')
+                            if applied_protocol ==0:
+                                applied_protocol = 1
                             else:
-                                self.lmp.command(f'create_atoms 3 random {int(to_add)} {i+1} SOURCE')
-                        else:
-                            self.lmp.command(f'create_atoms 2 random {int(to_add)} {i+1} SOURCE')
-                    if to_add<0:
-                        self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3} compress no')
+                                applied_protocol = 0
 
+                    oldsteps = self.MDsteps
+
+                # (DPD SIMULATIONS)
+                # --- change particle types in source and sink to establish a gradient
+                if simplegcmc:
+                    self.lmp.command('set region source type 3')
+                    self.lmp.command('set region sink type 7')
+
+                # (LANGEVIN DYNAMICS SIMULATIONS)
+                # --- do gcmc by hand rather than using fix gcmc
+                if gcmc_by_hand:
+
+                    to_add = 0
+                    to_delete = 0
+                    
                     # --------------------
-                    # SINK
+                    # SOURCE
                     # --------------------
 
-                    # count how many particles there are in the sink
-                    if not pure_sink:
-                        particles_sink = self.lmp.numpy.extract_compute("countsink", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
-                
-                    # if you want to regulate the number of particles in the sink
-                    if not pure_sink:
-                        to_delete = desired_particles_sink - particles_sink[-1]
-
-                    # if you need to delete particles because there are too many
-                    if to_delete<0:
-                        self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2} compress no')
-
-                    # if you need to add particles because there are too few in the sink
-                    if to_delete>0:
-                        if evaluate_inside_membrane:
-                            if self.heterogeneous_membrane:
-                                self.lmp.command(f'create_atoms 4 random {int(to_delete)} {i+4} SINK')
-                            else:
-                                self.lmp.command(f'create_atoms 3 random {int(to_delete)} {i+4} SINK')
-                        else:
-                            self.lmp.command(f'create_atoms 2 random {int(to_delete)} {i+4} SINK')
-
-                    # delete particles in sink by default
-                    if pure_sink:
-                        self.lmp.command(f'delete_atoms region SINK compress no')
-
-                    # reevaluate group type 3 for correct integration
-                    if evaluate_inside_membrane:
-                        if self.heterogeneous_membrane:
-                            self.lmp.command(f'group metabolites type 4')
-                        else:
-                            self.lmp.command(f'group metabolites type 3')
-                    else:
-                        self.lmp.command(f'group metabolites type 2')
-
-                elif self.multivalency:
-                    
-                    # if we have several sources
-                    if type(desired_particles_source) is list:
-                        
-                        # update the concentration in each of the sources
-                        for sourcenum in range(len(desired_particles_source)):
-                            
-                            # count how many particles are there in the specific source
-                            particles_source = self.lmp.numpy.extract_compute(f"countsource{sourcenum+1}", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
-
-                            # CAREFUL HERE!!! add needed particles in source
-                            to_add = desired_particles_source[sourcenum] - particles_source[3]
-
-                            # if you need to add particles because there are not enough
-                            if to_add>0:
-                                self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE{sourcenum+1}')
-                            if to_add<0:
-                                self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource{sourcenum+1} SOURCE{sourcenum+1} {i+3} compress no')
-
-                    # if we have a single source
-                    else:
+                    if not self.multivalency:
                         # count how many particles are there in the source
                         particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
 
-                        # CAREFUL HERE!!! add needed particles in source
-                        to_add = desired_particles_source - particles_source[3]
+                        # add needed particles in source (assuming reactants always last type)
+                        to_add = desired_particles_source - particles_source[-1]
 
                         # if you need to add particles because there are not enough
                         if to_add>0:
-                            self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE')
+                            if evaluate_inside_membrane:
+                                if self.heterogeneous_membrane:
+                                    self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE')
+                                else:
+                                    self.lmp.command(f'create_atoms 3 random {int(to_add)} {i+1} SOURCE')
+                            else:
+                                self.lmp.command(f'create_atoms 2 random {int(to_add)} {i+1} SOURCE')
                         if to_add<0:
                             self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3} compress no')
 
-                    # --------------------
-                    # SINK
-                    # --------------------
-
-                    if desired_particles_sink!= -1 and flat_patch == False:
+                        # --------------------
+                        # SINK
+                        # --------------------
 
                         # count how many particles there are in the sink
                         if not pure_sink:
                             particles_sink = self.lmp.numpy.extract_compute("countsink", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
-                            to_delete = desired_particles_sink - particles_sink[3]
+                    
+                        # if you want to regulate the number of particles in the sink
+                        if not pure_sink:
+                            to_delete = desired_particles_sink - particles_sink[-1]
 
-                            # if you need to delete particles because there are too many
-                            if to_delete<0:
-                                self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2} compress no')
+                        # if you need to delete particles because there are too many
+                        if to_delete<0:
+                            self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2} compress no')
 
-                            # if you need to add particles because there are too few in the sink
-                            if to_delete>0:
-                                self.lmp.command(f'create_atoms 4 random {int(to_delete)} {i+4} SINK')
-                                
+                        # if you need to add particles because there are too few in the sink
+                        if to_delete>0:
+                            if evaluate_inside_membrane:
+                                if self.heterogeneous_membrane:
+                                    self.lmp.command(f'create_atoms 4 random {int(to_delete)} {i+4} SINK')
+                                else:
+                                    self.lmp.command(f'create_atoms 3 random {int(to_delete)} {i+4} SINK')
+                            else:
+                                self.lmp.command(f'create_atoms 2 random {int(to_delete)} {i+4} SINK')
+
                         # delete particles in sink by default
-                        elif pure_sink:
+                        if pure_sink:
                             self.lmp.command(f'delete_atoms region SINK compress no')
 
-            # reevaluate groups for correct integration
-            if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and self.multivalency:
+                        # reevaluate group type 3 for correct integration
+                        if evaluate_inside_membrane:
+                            if self.heterogeneous_membrane:
+                                self.lmp.command(f'group metabolites type 4')
+                            else:
+                                self.lmp.command(f'group metabolites type 3')
+                        else:
+                            self.lmp.command(f'group metabolites type 2')
 
-                # reevaluate group for correct integration
-                self.lmp.command(f'group ssDNA clear')
-                self.lmp.command(f'group ssDNA type 3')
-                # empty ssRNA (metabolite) group, and refill again
-                self.lmp.command(f'group ssRNA clear')
-                self.lmp.command(f'group ssRNA type 4')
-                # empty DNARNA (bound) group, and refill again
-                self.lmp.command(f'group DNARNA clear')
-                self.lmp.command(f'group DNARNA type 5')
-                # empty wholevesicle group, and refill again
-                self.lmp.command(f'group wholevesicle clear')
-                self.lmp.command(f'group wholevesicle union vertices ghost ssDNA DNARNA')
-                # empty tomove group, and refill again (integrator applies here)
-                
-                # which particles to move in multivalency simulations
-                if self.flat_multivalency:
-                    self.lmp.command(f'group tomove clear')
-                    self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
-                elif self.carpet:
-                    # ssRNA and the boundRNA CANNOT MOVE!!!
-                    self.lmp.command(f'group boundRNA clear')
-                    self.lmp.command(f'group boundRNA type 6')
-                    self.lmp.command(f'group burnedRNA clear')
-                    self.lmp.command(f'group burnedRNA type 7')
-                    self.lmp.command(f'group tomove clear')
-                    self.lmp.command(f'group tomove union vertices ssDNA DNARNA')
-                    self.lmp.command(f'group printgroup clear')
-                    self.lmp.command(f'group printgroup union vertices ghost ssDNA DNARNA boundRNA burnedRNA')
-
-                    # ---------------------------------
-                    # detect unbinding and halt the simulation
-                    types_atoms = self.lmp.numpy.extract_atom("type")
-                    # get the indexes of the vertices
-                    particle_indexes = np.where(types_atoms == 5)[0]
-                    if len(particle_indexes)==0:
-                        print("Vesicle has detached")
-                        fhalt = open('haltedsimulation.dat', 'w')
-                        fhalt.writelines(f'Simulation halted at {i} because no DNA-RNA hybrid\n')
-                        fhalt.writelines("\n")
-                        fhalt.close()
-
-                        # save the crashed configuration
-                        self.lmp.command('write_data haltedlast.config')
-                        # write a final picklet
-                        with open(f"halt.pickle", 'wb') as f:
-                            pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
-                        # exit from the simulation
-                        sys.exit(1)
-                else:
-                    self.lmp.command(f'group tomove clear')
-
-                    if with_aux:
-                        self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA aux')
-                    else:
-                        self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
-
-            # compute the amplitudes of the spherical harmonics
-            if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)) and compute_amplitudes_on_the_fly:
-                
-                if self.MDsteps%frequency_amplitudes_on_the_fly==0:
-                    
-                    # compute the amplitudes for the current mesh
-                    alms = amplitudes_on_the_fly(self.mesh.x, lmax = lmax, ntheta = 70, nphi = 140, radius_membrane = 29.72)
-                    
-                    # flag to determine whether we should turn interactions on
-                    turn_on_interactions = True
-
-                    # for the amplitudes that we do not want
-                    # (remember, we only want to excite l = 2)
-                    for l in range(3, lmax):
-                        for m in range(-l, l+1):
-                            # amplitude that we print
-                            absolute_amplitude = np.abs(alms[l, l+m])
-                            #print(absolute_amplitude)
-                            # amplitude is below the threshold
-                            if amplitude_below_threshold:
-                                # did it go above the threshold?
-                                if absolute_amplitude>upper_threshold_amplitudes:
-                                    amplitude_below_threshold = False 
-                                    amplitude_above_threshold = True
-                                    turn_on_interactions = False
-                                    if amplitude_shut_down is not None:
-                                        for command in amplitude_shut_down:
-                                            self.lmp.command(command)
-                                    famplitudesfly.writelines(f"{self.MDsteps} OFF\n")
-                                    famplitudesfly.flush()
-                                    break
-                            # we are trying to get the amplitude below threshold
-                            if amplitude_above_threshold:
-                                # if we measure any amplitude that has not relaxed yet
-                                if absolute_amplitude>lower_threshold_amplitudes:
-                                    # we cannot turn the interactions
-                                    turn_on_interactions = False 
-                    
-                    # if all the amplitudes we have measured are below the 
-                    # threshold we have dictated, then we can turn on the interactions
-                    if amplitude_above_threshold and turn_on_interactions:
-                        amplitude_above_threshold = False 
-                        amplitude_below_threshold = True 
-                        famplitudesfly.writelines(f"{self.MDsteps} ON\n")
-                        famplitudesfly.flush()
-                        if amplitude_turn_on is not None:
-                            for command in amplitude_turn_on:
-                                self.lmp.command(command)
+                    elif self.multivalency:
+                        
+                        # if we have several sources
+                        if type(desired_particles_source) is list:
                             
+                            # update the concentration in each of the sources
+                            for sourcenum in range(len(desired_particles_source)):
+                                
+                                # count how many particles are there in the specific source
+                                particles_source = self.lmp.numpy.extract_compute(f"countsource{sourcenum+1}", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+
+                                # CAREFUL HERE!!! add needed particles in source
+                                to_add = desired_particles_source[sourcenum] - particles_source[3]
+
+                                # if you need to add particles because there are not enough
+                                if to_add>0:
+                                    self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE{sourcenum+1}')
+                                if to_add<0:
+                                    self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource{sourcenum+1} SOURCE{sourcenum+1} {i+3} compress no')
+
+                        # if we have a single source
+                        else:
+                            # count how many particles are there in the source
+                            particles_source = self.lmp.numpy.extract_compute("countsource", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+
+                            # CAREFUL HERE!!! add needed particles in source
+                            to_add = desired_particles_source - particles_source[3]
+
+                            # if you need to add particles because there are not enough
+                            if to_add>0:
+                                self.lmp.command(f'create_atoms 4 random {int(to_add)} {i+1} SOURCE')
+                            if to_add<0:
+                                self.lmp.command(f'delete_atoms random count {int(to_add*(-1))} no insource SOURCE {i+3} compress no')
+
+                        # --------------------
+                        # SINK
+                        # --------------------
+
+                        if desired_particles_sink!= -1 and flat_patch == False:
+
+                            # count how many particles there are in the sink
+                            if not pure_sink:
+                                particles_sink = self.lmp.numpy.extract_compute("countsink", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR)
+                                to_delete = desired_particles_sink - particles_sink[3]
+
+                                # if you need to delete particles because there are too many
+                                if to_delete<0:
+                                    self.lmp.command(f'delete_atoms random count {int(to_delete*(-1))} no insink SINK {i+2} compress no')
+
+                                # if you need to add particles because there are too few in the sink
+                                if to_delete>0:
+                                    self.lmp.command(f'create_atoms 4 random {int(to_delete)} {i+4} SINK')
+                                    
+                            # delete particles in sink by default
+                            elif pure_sink:
+                                self.lmp.command(f'delete_atoms region SINK compress no')
+
+                # (LANGEVIN DYNAMICS SIMULATIONS)
+                # --- reevaluate groups for correct integration
+                if self.multivalency:
+                    # reevaluate group for correct integration
+                    self.lmp.command(f'group ssDNA clear')
+                    self.lmp.command(f'group ssDNA type 3')
+                    # empty ssRNA (metabolite) group, and refill again
+                    self.lmp.command(f'group ssRNA clear')
+                    self.lmp.command(f'group ssRNA type 4')
+                    # empty DNARNA (bound) group, and refill again
+                    self.lmp.command(f'group DNARNA clear')
+                    self.lmp.command(f'group DNARNA type 5')
+                    # empty wholevesicle group, and refill again
+                    self.lmp.command(f'group wholevesicle clear')
+                    self.lmp.command(f'group wholevesicle union vertices ghost ssDNA DNARNA')
+                    # empty tomove group, and refill again (integrator applies here)
+                    
+                    # which particles to move in multivalency simulations
+                    if self.flat_multivalency:
+                        self.lmp.command(f'group tomove clear')
+                        self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
+                    elif self.carpet:
+                        # ssRNA and the boundRNA CANNOT MOVE!!!
+                        self.lmp.command(f'group boundRNA clear')
+                        self.lmp.command(f'group boundRNA type 6')
+                        self.lmp.command(f'group burnedRNA clear')
+                        self.lmp.command(f'group burnedRNA type 7')
+                        self.lmp.command(f'group tomove clear')
+                        self.lmp.command(f'group tomove union vertices ssDNA DNARNA')
+                        self.lmp.command(f'group printgroup clear')
+                        self.lmp.command(f'group printgroup union vertices ghost ssDNA DNARNA boundRNA burnedRNA')
+
+                        # ---------------------------------
+                        # detect unbinding and halt the simulation
+                        types_atoms = self.lmp.numpy.extract_atom("type")
+                        # get the indexes of the vertices
+                        particle_indexes = np.where(types_atoms == 5)[0]
+                        if len(particle_indexes)==0:
+                            print("Vesicle has detached")
+                            fhalt = open('haltedsimulation.dat', 'w')
+                            fhalt.writelines(f'Simulation halted at {i} because no DNA-RNA hybrid\n')
+                            fhalt.writelines("\n")
+                            fhalt.close()
+
+                            # save the crashed configuration
+                            self.lmp.command('write_data haltedlast.config')
+                            # write a final picklet
+                            with open(f"halt.pickle", 'wb') as f:
+                                pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+                            # exit from the simulation
+                            sys.exit(1)
+                    else:
+                        self.lmp.command(f'group tomove clear')
+
+                        if with_aux:
+                            self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA aux')
+                        else:
+                            self.lmp.command(f'group tomove union vertices ssDNA ssRNA DNARNA')
+
+                # --- compute the amplitudes of the spherical harmonics
+                if compute_amplitudes_on_the_fly:
+                    if self.MDsteps%frequency_amplitudes_on_the_fly==0:
+                        
+                        # compute the amplitudes for the current mesh
+                        alms = amplitudes_on_the_fly(self.mesh.x, lmax = lmax, ntheta = 70, nphi = 140, radius_membrane = 29.72)
+                        
+                        # flag to determine whether we should turn interactions on
+                        turn_on_interactions = True
+
+                        # for the amplitudes that we do not want
+                        # (remember, we only want to excite l = 2)
+                        for l in range(3, lmax):
+                            for m in range(-l, l+1):
+                                # amplitude that we print
+                                absolute_amplitude = np.abs(alms[l, l+m])
+                                #print(absolute_amplitude)
+                                # amplitude is below the threshold
+                                if amplitude_below_threshold:
+                                    # did it go above the threshold?
+                                    if absolute_amplitude>upper_threshold_amplitudes:
+                                        amplitude_below_threshold = False 
+                                        amplitude_above_threshold = True
+                                        turn_on_interactions = False
+                                        if amplitude_shut_down is not None:
+                                            for command in amplitude_shut_down:
+                                                self.lmp.command(command)
+                                        famplitudesfly.writelines(f"{self.MDsteps} OFF\n")
+                                        famplitudesfly.flush()
+                                        break
+                                # we are trying to get the amplitude below threshold
+                                if amplitude_above_threshold:
+                                    # if we measure any amplitude that has not relaxed yet
+                                    if absolute_amplitude>lower_threshold_amplitudes:
+                                        # we cannot turn the interactions
+                                        turn_on_interactions = False 
+                        
+                        # if all the amplitudes we have measured are below the 
+                        # threshold we have dictated, then we can turn on the interactions
+                        if amplitude_above_threshold and turn_on_interactions:
+                            amplitude_above_threshold = False 
+                            amplitude_below_threshold = True 
+                            famplitudesfly.writelines(f"{self.MDsteps} ON\n")
+                            famplitudesfly.flush()
+                            if amplitude_turn_on is not None:
+                                for command in amplitude_turn_on:
+                                    self.lmp.command(command)
+                                
+                # --- unfix/remove the chemical reactions in the system
+                if step_unfix_reactions is not None:
+                    if self.MDsteps == step_unfix_reactions:
+                        if new_reaction_commands is not None:
+                            print("Updating chemical reactions...")
+                            for commands in new_reaction_commands:
+                                self.lmp.command(commands)
+                            print("Done.")
+                        else:
+                            print("ERROR: You want to change the chemical reactions, but new_reaction_command is None.")
+                            sys.exit(1)
 
     ############################################################################
     #                    *SELF FUNCTIONS*: WRAPPER FUNCTIONS                   #
