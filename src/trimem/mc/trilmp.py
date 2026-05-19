@@ -1,19 +1,16 @@
 ################################################################################
-# TriLmp: TRIMEM (Siggel et. al, 2023) + LAMMPS                                #
+# TriLMP: TRIMEM (Siggel et. al, 2023) + LAMMPS                                #
 # Enabling versatile MD simulations w/dynamically triangulated membranes       #
-#                                                                              #
-# This program was originally created during the summer of 2023                #
-# by Michael Wassermair during an internship in the Saric Group (ISTA).        #
-# It is based on TRIMEM (Siggel et al.), which was originally intended         #
+# -----------------------------------------------------------------------------#
+# This program was originally developed during the summer of 2023              #
+# by M. Wassermair and M. Amaral during an internship in                       #
+# the Saric Group (ISTA). The restructuring, documentation and extension of    #
+# the code to simulate different soft matter & biological scenarios is         #
+# due to M. Muñoz-Basagoiti.                                                   #
+# -----------------------------------------------------------------------------#
+# TriLMp is based on TRIMEM (Siggel et al.), which was originally intended     #
 # to perform Hybrid Monte Carlo (HMC) energy minimization of the Helfrich      #
-# Hamiltonian using a vertex-averaged triangulated mesh discretisation.        #
-# By connecting the latter with LAMMPS, we expose the mesh vertices            #
-# (pseudo-particles). This allows us to perform simulations of a               #
-# triangulated membrane under different scenarios, detailed below.             #                                                
-#                                                                              #
-# The program depends on a modified version of trimem and LAMMPS that uses     #
-# specific packages and the additional pair_styles nonreciprocal               #
-# and nonreciprocal/omp (see SETUP_GUIDE.txt and HowTo_TriLMP.md for details)  #
+# Hamiltonian using a vertex-averaged triangulated mesh discretisation.        #                                                
 #                                                                              #
 # ORIGINAL PROGRAM STRUCTURE                                                   #
 # - Internal classes used by TriLmp                                            #
@@ -27,7 +24,8 @@
 # --- LAMMPS initialisation                                                    #
 # ---+++ Creating instances of lmp                                             #
 # ---+++ Setting up Basic system                                               #
-# ---+++ Calling Lammps functions to set thermostat and interactions           #
+# Additional LAMMPS functions (thermostat, interactions, integrators...)       #
+# should be introduced from the outside, for transparency.                     #
 #                                                                              #
 # --- FLIPPING Functions                                                       #
 # --- HMC/MD Functions + Wrapper Functions used on TRIMEM side                 #
@@ -38,7 +36,8 @@
 # --- Pickle + Checkpoint Utility                                              #
 # --- LAMMPS scrips used for setup                                             #
 #                                                                              #
-# The code has been restructured and rewritten by Maitane Munoz Basagoiti      #
+# NOTE THAT:                                                                   #
+# The code has been restructured and rewritten by M. Muñoz-Basagoiti           #
 # after its initial implementation. The TriLMP class has been reduced to its   #
 # minimum with the goal of having a more organic coupling to LAMMPS. The       #
 # main motivation of this rewriting was to improve code readability, make      #
@@ -48,7 +47,8 @@
 # The code is stored in a GitHub repository. It is therefore subjected to      #
 # version control. Should you be interested in checking older versions,        #
 # please refer to that.                                                        #
-#                                                                              #             
+# -----------------------------------------------------------------------------#           
+# (OUTDATED - More functionalities available now)                              #
 # CURRENT TRILMP FUNCTIONALITIES                                               #
 # 1. Triangulated vesicle in solution                                          #
 #   1.1. Tube pulling experiment                                               #
@@ -105,7 +105,7 @@ from lammps import lammps, PyLammps, LAMMPS_INT, LMP_STYLE_GLOBAL, LMP_VAR_EQUAL
 from scipy.spatial import KDTree
 
 # for spherical harmonics analysis
-from chemical_gradients.module_sphericalharmonics import *
+#from chemical_gradients.module_sphericalharmonics import *
 
 _sp = u'\U0001f604'
 _nl = '\n'+_sp
@@ -377,7 +377,6 @@ class TriLmp():
                  bead_sizes=0.0,                # bead sizes
                  bead_types=[2],                 # bead types
                  n_bond_types = 1,
-                 bead_bonds = None,
                  
                  # EXTENSIONS MMB:
                  # self-propelled particles in system (dipole-based propulsion)
@@ -469,7 +468,9 @@ class TriLmp():
         self.heterogeneous_membrane = heterogeneous_membrane
         self.heterogeneous_membrane_id = heterogeneous_membrane_id
         self.self_propelled       = self_propelled
-        
+        self.Nlinkers = 0
+        self.dpdNlinkers = 0
+
         # decide whether or not you want pickles
         self.generate_pickles     = generate_pickles
 
@@ -506,6 +507,7 @@ class TriLmp():
 
         # extract number of membrane vertices in simulation
         self.n_vertices=self.mesh.x.shape[0]
+        print('Number of vertices: ', self.n_vertices)
         # extract the number of membrane faces in simulation
         self.n_faces   = self.mesh.f.shape[0]
 
@@ -701,11 +703,12 @@ class TriLmp():
         #                  EXTENSION: MULTIVALENCY                             #
         ########################################################################
         self.multivalency = multivalency
+        self.multivalent_linker_length=multivalent_linker_length
+        self.multivalent_linker_stiffness=multivalent_linker_stiffness
+        self.multivalent_hybridization_stiffness=multivalent_hybridization_stiffness
+        self.multivalent_hybridization_length=multivalent_hybridization_length
+        self.multivalent_bonds = multivalent_bonds
         if multivalency:
-            self.multivalent_linker_length=multivalent_linker_length
-            self.multivalent_linker_stiffness=multivalent_linker_stiffness
-            self.multivalent_hybridization_stiffness=multivalent_hybridization_stiffness
-            self.multivalent_hybridization_length=multivalent_hybridization_length
             n_bond_types+=2 # 2 new bond types, one for the creation of the valency and one for the linkers 
             n_tethers=Nlinkers
             self.Nlinkers = Nlinkers
@@ -722,11 +725,13 @@ class TriLmp():
         #                  EXTENSION: DPD MULTIVALENCY                         #
         ########################################################################
         self.dpdmultivalency = dpdmultivalency
+        self.dpdmultivalent_linker_length=dpdmultivalent_linker_length
+        self.dpdmultivalent_linker_stiffness=dpdmultivalent_linker_stiffness
+        self.dpdmultivalent_hybridization_stiffness=dpdmultivalent_hybridization_stiffness
+        self.dpdmultivalent_hybridization_length=dpdmultivalent_hybridization_length
+        self.dpdmultivalent_bonds = dpdmultivalent_bonds
+
         if dpdmultivalency:
-            self.dpdmultivalent_linker_length=dpdmultivalent_linker_length
-            self.dpdmultivalent_linker_stiffness=dpdmultivalent_linker_stiffness
-            self.dpdmultivalent_hybridization_stiffness=dpdmultivalent_hybridization_stiffness
-            self.dpdmultivalent_hybridization_length=dpdmultivalent_hybridization_length
             n_bond_types+=2 # 2 new bond types, one for the creation of the valency and one for the linkers 
             n_tethers=dpdNlinkers
             self.Nlinkers = dpdNlinkers
@@ -778,11 +783,14 @@ class TriLmp():
         self.fix_rigid_symbiont_coordinates = fix_rigid_symbiont_coordinates
         self.fix_rigid_symbiont_nparticles  =   0
         self.fix_rigid_symbiont_flag        = 0
-
-        if self.fix_rigid_symbiont:
+        if self.fix_rigid_symbiont_coordinates is not None:
             self.fix_rigid_symbiont_nparticles  = len(self.fix_rigid_symbiont_coordinates)
-            self.fix_rigid_symbiont_interaction = fix_rigid_symbiont_interaction
-            self.fix_rigid_symbiont_params      = fix_rigid_symbiont_params
+        else:
+            self.fix_rigid_symbiont_nparticles = 0
+        self.fix_rigid_symbiont_interaction = fix_rigid_symbiont_interaction
+        self.fix_rigid_symbiont_params      = fix_rigid_symbiont_params
+        
+        if self.fix_rigid_symbiont:
             self.fix_rigid_symbiont_flag        = 1
 
             if len(self.fix_rigid_symbiont_params)<1:
@@ -839,6 +847,11 @@ class TriLmp():
 
         # if we want to have angles in the system
         angle_style_text=""
+        self.add_angles = add_angles
+        self.n_angle_types = n_angle_types
+        self.angles_total = angles_total
+        self.angle_triplets = angle_triplets
+
         if add_angles:
             atom_style_text = "full" # molecular (we need dihedrals) + charge
             angle_style_text = f"angle/types {n_angle_types}"
@@ -948,7 +961,7 @@ class TriLmp():
         self.n_edges = self.edges.shape[0]
 
         # if no restart file has been provided
-        if restart_file is None and initialize:
+        if restart_file is None:
 
             # create initialization file
             with open('sim_setup.in', 'w') as f:
@@ -1232,16 +1245,42 @@ class TriLmp():
             """))
 
         # [INTERACTION POTENTIAL] - SINGLE PARTICLE IN MEMBRANE
-        if not heterogeneous_membrane:
-            # write down the table for surface repulsion
-            self.lmp.commands_string(dedent(f"""\
-            pair_style python {self.eparams.repulse_params.lc1}
-            pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
-            shell rm -f trimem_srp.table
-            pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp 1.0 1.0
-            pair_style none
-            """))
+        
+        # ORIGINAL IMPLEMENTATION
+        # write down the table for surface repulsion
+        #self.lmp.commands_string(dedent(f"""\
+        #pair_style python {self.eparams.repulse_params.lc1}
+        #pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
+        #shell rm -f trimem_srp.table
+        #pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp 1.0 1.0
+        #pair_style none
+        #"""))
 
+        # Mac-compatible code: generate surface repulsion table in pure Python, instead of using the Mac-linked python
+        lc1 = self.eparams.repulse_params.lc1
+        srp1 = lc1
+        srp2 = self.eparams.kappa_r
+        srp3 = self.eparams.repulse_params.r
+
+        # clean-up if table exists
+        if os.path.exists("trimem_srp.table"):
+            os.remove("trimem_srp.table")
+            
+        with open("trimem_srp.table", "w") as _f:
+            
+            _f.write("trimem_srp\nN 2000 RSQ 0.000001 %s\n\n" % lc1)
+            for _i in range(1, 2001):
+                _rsq = 1e-6 + (lc1 - 1e-6) * (_i-1) / 1999
+                _r = np.sqrt(_rsq)
+                _rl = _r - srp1
+                if _rl >= 0:
+                    _e, _f2 = 0.0, 0.0
+                else:
+                    _e = np.exp(_r/_rl) / _r**srp3 * srp2
+                    _f2 = srp2 * np.exp(_r/_rl) * (srp1/(_rl**2) + srp3/_r) / _r**(srp3+1)
+                _f.write(f"{_i} {_rsq:.10e} {_e:.10e} {_f2:.10e}\n")
+
+        if not heterogeneous_membrane:
             # get the 'table' interaction to work
             self.lmp.commands_string(dedent(f"""\
             pair_style hybrid/overlay table linear 2000 lj/cut 2.5
@@ -1252,24 +1291,25 @@ class TriLmp():
         
         # [EXTENSION] [INTERACTION POTENTIAL] - TWO PARTICLES IN MEMBRANE
         if heterogeneous_membrane:
+            # ORIGINAL IMPLEMENTATION
             # write down the table for surface repulsion
-            self.lmp.commands_string(dedent(f"""\
-            pair_style python {self.eparams.repulse_params.lc1}
-            pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
-            shell rm -f trimem_srp.table
-            pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp11 1.0 1.0
-            pair_write  2 2 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp22 1.0 1.0
-            pair_write  1 2 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp12 1.0 1.0
-            pair_style none
-            """))
+            #self.lmp.commands_string(dedent(f"""\
+            #pair_style python {self.eparams.repulse_params.lc1}
+            #pair_coeff * * trilmp_srp_pot.SRPTrimem {'C '*self.num_particle_types}
+            #shell rm -f trimem_srp.table
+            #pair_write  1 1 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp11 1.0 1.0
+            #pair_write  2 2 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp22 1.0 1.0
+            #pair_write  1 2 2000 rsq 0.000001 {self.eparams.repulse_params.lc1} trimem_srp.table trimem_srp12 1.0 1.0
+            #pair_style none
+            #"""))
 
             # get the 'table' interaction to work
             self.lmp.commands_string(dedent(f"""\
             pair_style hybrid/overlay table linear 2000 lj/cut 2.5
             pair_modify pair table special lj/coul 0.0 0.0 0.0 tail no
-            pair_coeff 1 1 table trimem_srp.table trimem_srp11
-            pair_coeff 2 2 table trimem_srp.table trimem_srp22
-            pair_coeff 1 2 table trimem_srp.table trimem_srp12
+            pair_coeff 1 1 table trimem_srp.table trimem_srp
+            pair_coeff 2 2 table trimem_srp.table trimem_srp
+            pair_coeff 1 2 table trimem_srp.table trimem_srp
             pair_coeff * * lj/cut 0 0 0
             """))
 
@@ -2880,7 +2920,8 @@ class TriLmp():
     ############################################################################
 
     def __reduce__(self):
-        return self.__class__,(self.initialize,
+        return self.__class__,(
+                self.initialize,
                 self.debug_mode,
                 self.num_particle_types,
                 self.mass_particle_type,
@@ -2966,6 +3007,41 @@ class TriLmp():
                 self.beads.bead_sizes,
                 self.beads.types,
                 self.n_bond_types,
+                self.self_propelled,
+                self.multivalency,
+                self.multivalent_linker_length,
+                self.multivalent_linker_stiffness,
+                self.multivalent_hybridization_length,
+                self.multivalent_hybridization_stiffness,
+                self.multivalent_bonds,
+                self.Nlinkers,
+                self.dpdmultivalency,
+                self.dpdmultivalent_linker_length,
+                self.dpdmultivalent_linker_stiffness,
+                self.dpdmultivalent_hybridization_length,
+                self.dpdmultivalent_hybridization_stiffness,
+                self.dpdmultivalent_bonds,
+                self.dpdNlinkers,
+                self.slayer,
+                self.slayer_points,
+                self.slayer_bonds,
+                self.slayer_dihedrals,
+                self.slayer_kbond,
+                self.slayer_kdihedral,
+                self.slayer_rlbond,
+                self.fix_rigid_symbiont, 
+                self.fix_rigid_symbiont_coordinates,
+                self.fix_rigid_symbiont_interaction,   
+                self.fix_rigid_symbiont_params, 
+                self.heterogeneous_membrane,
+                self.heterogeneous_membrane_id,
+                self.test_mode,
+                self.add_angles,
+                self.n_angle_types,
+                self.angles_total,
+                self.angle_triplets,
+                self.generate_pickles,
+                self.restart_file
                 )
     
     def __getstate__(self):

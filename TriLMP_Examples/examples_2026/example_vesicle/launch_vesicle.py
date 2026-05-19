@@ -24,9 +24,6 @@ import numpy as np
 import pandas as pd
 from trimem.mc.trilmp import TriLmp
 
-# generate directory to save sim. checkpoints
-Path("checkpoints").mkdir(exist_ok=True)
-
 # mesh initialization
 mesh = trimesh.creation.icosphere(3)
 N = len(mesh.vertices)
@@ -143,7 +140,7 @@ print(" - Load sim_setup.in in Ovito to check the initial configuration")
 print(" - Load trajectory.dump in Ovito to check the simulated trajectory")
 print(" - Check the performance of the code in inp_performance.dat")
 print(" - Check the properties of the vesicle in inp_system.dat and membrane_properties.dat")
-print(" - Reload pickle checkpoints from checkpoints/ckpt_*")
+print(" - Reload pickle checkpoints from ckptA.pickle or ckptB.pickle (last snapshot).")
 print("")
 print("Have fun!")
 print("")

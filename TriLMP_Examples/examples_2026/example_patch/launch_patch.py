@@ -4,7 +4,7 @@
 #                                                                      #
 # This code launches TriLMP for a fluid membrane patch.                #
 #                                                                      #
-# OUTPUTS:                                                             #  
+# OUTPUTS:                                                             #
 # - TriLMP prints:                                                     #
 #   + Total Trimem energy (see inp_system.dat)                         #
 #   + Area of the mesh (see inp_system.dat)                            #
@@ -18,9 +18,6 @@ import trimesh
 import numpy as np
 import pandas as pd
 from trimem.mc.trilmp import TriLmp
-
-# generate directory to save sim. checkpoints
-Path("checkpoints").mkdir(exist_ok=True)
 
 # mesh initialization as a triangulated lattice
 mesh_coordinates = pd.read_csv('mesh_coordinates.dat', header = None, index_col = False, sep = ' ')
@@ -222,7 +219,7 @@ print(" - Load trajectory.dump in Ovito to check the simulated trajectory")
 print(" - Add to the Ovito trajectory the mem.bonds file to visualize the network")
 print(" - Check the performance of the code in inp_performance.dat")
 print(" - Check the properties of the vesicle in inp_system.dat and membrane_properties.dat")
-print(" - Reload pickle checkpoints from checkpoints/ckpt_*")
+print(" - Reload pickle checkpoints from ckptA.pickle or ckptB.pickle (last snapshot).")
 print("")
 print("Have fun!")
 print("")
