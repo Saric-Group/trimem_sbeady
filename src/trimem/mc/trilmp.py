@@ -1968,6 +1968,13 @@ class TriLmp():
             print("THERMALIZATION DONE. INITIALIZING FROM A RESTART.")
             #return
 
+        if new_reaction_commands is not None:
+            # create flag in case reactions have to be updated
+            # flag is necessary in case two MD events are chained
+            # by TriLMP (otherwise it might try to update the
+            # reactions again, and complain because it is not possible)
+            reactions_updated = False 
+
         # run simulation for dictated number of MD steps
         while self.MDsteps<N:
             
@@ -2466,8 +2473,12 @@ class TriLmp():
                     
                     # which particles to move in multivalency simulations
                     if self.flat_multivalency:
+                        # empty DNARNA (bound) group, and refill again
+                        self.lmp.command(f'group boundRNA clear')
+                        self.lmp.command(f'group boundRNA type 6')
                         self.lmp.command(f'group tomove clear')
-                        self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA')
+                        self.lmp.command(f'group tomove union BULK ssDNA ssRNA DNARNA boundRNA')
+                        
                     elif self.carpet:
                         # ssRNA and the boundRNA CANNOT MOVE!!!
                         self.lmp.command(f'group boundRNA clear')
@@ -2557,11 +2568,12 @@ class TriLmp():
                 # --- unfix/remove the chemical reactions in the system
                 if step_unfix_reactions is not None:
                     if self.MDsteps == step_unfix_reactions:
-                        if new_reaction_commands is not None:
+                        if (new_reaction_commands is not None) and (reactions_updated is False):
                             print("Updating chemical reactions...")
                             for commands in new_reaction_commands:
                                 self.lmp.command(commands)
                             print("Done.")
+                            reactions_updated = True
                         else:
                             print("ERROR: You want to change the chemical reactions, but new_reaction_command is None.")
                             sys.exit(1)
