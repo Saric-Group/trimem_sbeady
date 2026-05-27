@@ -3135,6 +3135,10 @@ def read_checkpoint(fname):
         trilmp = pickle.load(f)
     return trilmp
 
+"""
+# OUTDATED ---> 
+# TO RESTART SIMULATIONS, YOU NEED TO COMBINE
+# PICKLE FILE + LAMMPS FILE (SEE NOTES/README.MD)
 def load_checkpoint(name, alt='last'):
 
     if alt=='last':
@@ -3158,3 +3162,4 @@ def load_checkpoint(name, alt='last'):
         trilmp = read_checkpoint(f'{name}.cpt')
 
     return trilmp
+"""
