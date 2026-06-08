@@ -1854,7 +1854,8 @@ class TriLmp():
             factor_inside_membrane=0, naive_compression = False, desired_interlayer_distance=0, 
             gcmc_by_hand=False, desired_particles_source=0, pure_sink=False, desired_particles_sink=0,
             ghost_membrane_consumes = False, cutoff_consumption = 0, move_membrane=True, force_field_normals = False,
-            A_force =0 , B_force =0, linear_force=False, exponential_force = False, phoretic_force = False, concentration_source = 0, 
+            A_force =0 , B_force =0, linear_force=False, exponential_force = False, phoretic_force = False, constant_force = False,
+            concentration_source = 0, threshold_for_constant_force = 0, max_constant_force = 100,
             diffusion_coefficient = 1, evaluate_tip = False, tip_range = 0, evaluate_tip_freq = 0,
             interaction_range = 1.45, flat_patch = False, alternating_protocol=False, move_reactants =False,
             compute_amplitudes_on_the_fly = False, upper_threshold_amplitudes=1000, lower_threshold_amplitudes=0,
@@ -1896,6 +1897,11 @@ class TriLmp():
         self.exponential_force = exponential_force
         self.concentration_source = concentration_source
         self.diffusion_coefficient = diffusion_coefficient
+        # if you want a constant force (along the x direction)
+        self.constant_force = constant_force
+        self.magnitude_constant_force = self.A_force
+        self.threshold_for_constant_force = threshold_for_constant_force
+        self.max_constant_force = max_constant_force
         # if you want to have phoretic forces (it uses A_force as the magnitude)
         self.phoretic_force = phoretic_force
 
@@ -2299,6 +2305,7 @@ class TriLmp():
             # options once the system has equilibrated
             if (self.MDsteps>(self.equilibration_rounds+self.traj_steps)):
                 
+                print('Applying protocol')
                 # protocols that rely on LAMMPS commands which have to be added after equilibration
                 if step_dependent_protocol:
                     # if it is the frequency at which we want to apply the protocol
@@ -2307,6 +2314,7 @@ class TriLmp():
                             # if we have not applied all protocol steps
                             if applied_protocol<steps_in_protocol:
                                 for command in step_protocol_commands[applied_protocol]:
+                                    print(f'Adding {command}')
                                     self.lmp.command(command)
                                 # check what is the protocol step that has been applied
                                 applied_protocol+=1 
@@ -2665,7 +2673,6 @@ class TriLmp():
             # force field in the direction of x
             if self.linear_force:
                 magnitude_force = self.A_force*self.mesh.x[:, 0] + self.B_force
-
             elif self.exponential_force:
                 # initial condition, there is no force
                 if self.time_force == 0:
@@ -2673,16 +2680,49 @@ class TriLmp():
                 # force starts later on (note that the maximum is achieved at x = 0)
                 elif self.time_force>0:
                     magnitude_force = self.concentration_source*(1-erf(self.mesh.x[:, 0]/(2*np.sqrt(self.diffusion_coefficient*self.time_force))))
-
             elif self.phoretic_force:
                 distance_r2  = self.mesh.x[:, 0]**2 + self.mesh.x[:, 1]**2 + self.mesh.x[:, 2]**2
                 magnitude_force = self.A_force/distance_r2                
-            
+            elif self.constant_force:
+                furthest_vertex = np.argmax(self.mesh.x[:, 0])
+                xfurthest = self.mesh.x[furthest_vertex,0]
+                yfurthest = self.mesh.x[furthest_vertex,1]
+                zfurthest = self.mesh.x[furthest_vertex,2]
+
+                if xfurthest>=self.max_constant_force:
+                    print("YOUR MEMBRANE HAS TOUCHED THE END OF THE SIM BOX. END OF THE SIMULATION.")
+                    sys.exit(1)
+
+                distance_to_furthest_vertex = np.sqrt((self.mesh.x[:, 0] - xfurthest)**2 + (self.mesh.x[:, 1] - yfurthest)**2 + (self.mesh.x[:, 2] - zfurthest)**2)
+                #vertices_beyond_threshold_in_x = np.argsort(distance_to_furthest_vertex)[:self.threshold_for_constant_force]
+                vertices_beyond_threshold_in_x = np.where(distance_to_furthest_vertex<=self.threshold_for_constant_force)[0]
+                force_per_particle = self.magnitude_constant_force/len(vertices_beyond_threshold_in_x)
+
             if self.equilibrated:
-                # enables broadcasting of arrays
-                magnitude_force_newaxis = magnitude_force[:, np.newaxis]
-                forces_to_add = magnitude_force_newaxis*mean_vertex_normals
-                f[:self.n_vertices] += forces_to_add
+                if self.constant_force:
+                    f[vertices_beyond_threshold_in_x, 0] += force_per_particle
+                else:
+                    # enables broadcasting of arrays
+                    magnitude_force_newaxis = magnitude_force[:, np.newaxis]
+                    forces_to_add = magnitude_force_newaxis*mean_vertex_normals
+                    f[:self.n_vertices] += forces_to_add
+
+                # A test to check that the index assignment is correct
+                #i = 1804
+                #print("Vertex position:   ", self.mesh.x[i])
+                #print("Vertex normal:     ", mean_vertex_normals[i])
+                #print("Force magnitude:   ", magnitude_force[i])
+                #print("Force vector:      ", forces_to_add[i])
+
+                # Check the normal is actually perpendicular to the local surface
+                # (dot product of normal with itself should be ~1.0)
+                #print("Normal length:     ", np.linalg.norm(mean_vertex_normals[i]))
+
+                # Check the force vector is parallel to the normal
+                # (cross product should be ~zero)
+                #print("Cross product:     ", np.cross(forces_to_add[i], mean_vertex_normals[i]))
+                #wait = input()
+
 
         # if needed for flat membrane, correct
         if np.any(self.vertices_at_edge):
