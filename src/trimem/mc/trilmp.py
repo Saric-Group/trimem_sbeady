@@ -2574,7 +2574,7 @@ class TriLmp():
                                 self.lmp.command(commands)
                             print("Done.")
                             reactions_updated = True
-                        else:
+                        elif new_reaction_commands is None:
                             print("ERROR: You want to change the chemical reactions, but new_reaction_command is None.")
                             sys.exit(1)
 
